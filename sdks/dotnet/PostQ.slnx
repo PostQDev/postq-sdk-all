@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PostQ.Sdk/PostQ.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PostQ.Sdk.Tests/PostQ.Sdk.Tests.csproj" />
+  </Folder>
+</Solution>

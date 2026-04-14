@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>PostQ.Sdk</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>PostQ</Authors>
+    <Description>Official PostQ SDK for .NET — quantum-safe cryptography for your applications</Description>
+    <PackageTags>postq;quantum;cryptography;post-quantum;dilithium;signing;sdk</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RootNamespace>PostQ</RootNamespace>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>

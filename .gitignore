@@ -1,0 +1,19 @@
+# JavaScript
+sdks/js/node_modules/
+sdks/js/dist/
+sdks/js/*.tsbuildinfo
+
+# Python
+sdks/python/__pycache__/
+sdks/python/**/__pycache__/
+sdks/python/*.egg-info/
+sdks/python/dist/
+sdks/python/build/
+sdks/python/.venv/
+**/*.pyc
+
+# .NET
+sdks/dotnet/**/bin/
+sdks/dotnet/**/obj/
+sdks/dotnet/*.user
+sdks/dotnet/.vs/

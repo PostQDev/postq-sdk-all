@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "postq-sdk"
+version = "0.1.0"
+description = "Official PostQ SDK for Python — quantum-safe cryptography for your applications"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["postq", "quantum", "cryptography", "post-quantum", "dilithium", "signing"]
+dependencies = [
+    "urllib3>=1.26,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "responses>=0.25",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["postq*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

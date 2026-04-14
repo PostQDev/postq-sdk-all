@@ -10,8 +10,19 @@
     <Description>Official PostQ SDK for .NET — quantum-safe cryptography for your applications</Description>
     <PackageTags>postq;quantum;cryptography;post-quantum;dilithium;signing;sdk</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/PostQDev/postq-sdk-all/tree/main/sdks/dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/PostQDev/postq-sdk-all.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RootNamespace>PostQ</RootNamespace>
     <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
 </Project>

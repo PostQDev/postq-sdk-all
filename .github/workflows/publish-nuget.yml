@@ -1,0 +1,46 @@
+name: Publish NuGet
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    name: Publish PostQ.Sdk to NuGet
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/dotnet
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test --configuration Release --no-build
+
+      - name: Pack
+        run: >
+          dotnet pack src/PostQ.Sdk/PostQ.Sdk.csproj
+          --configuration Release
+          --no-build
+          --output nupkgs
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push nupkgs/*.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

@@ -17,3 +17,4 @@ sdks/dotnet/**/bin/
 sdks/dotnet/**/obj/
 sdks/dotnet/*.user
 sdks/dotnet/.vs/
+sdks/dotnet/nupkgs/

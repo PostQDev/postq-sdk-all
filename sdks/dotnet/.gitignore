@@ -1,0 +1,5 @@
+# .NET build artifacts
+obj/
+bin/
+*.user
+.vs/

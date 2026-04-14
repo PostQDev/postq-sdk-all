@@ -1,0 +1,4 @@
+# JS SDK dependencies
+node_modules/
+dist/
+*.tsbuildinfo

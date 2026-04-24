@@ -20,7 +20,7 @@ from .errors import (
     PostQRateLimitError,
     PostQServerError,
 )
-from .models import Finding, ScanListItem, ScanSubmitResult
+from .models import Asset, Finding, Key, ScanListItem, ScanSubmitResult
 
 DEFAULT_BASE_URL = "https://api.postq.dev"
 
@@ -89,6 +89,8 @@ class PostQ:
 
         # Resource namespaces.
         self.scans = ScansResource(self)
+        self.assets = AssetsResource(self)
+        self.keys = KeysResource(self)
 
     # ── public ──────────────────────────────────────────────────────────────
 
@@ -250,3 +252,159 @@ def _extract_error(resp: requests.Response) -> "tuple[str, Optional[str]]":
     except (ValueError, requests.exceptions.JSONDecodeError):
         pass
     return resp.text or f"HTTP {resp.status_code}", None
+
+
+class AssetsResource:
+    """Operations under ``/v1/assets``."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def list(
+        self,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+        provider: Optional[str] = None,
+        type: Optional[str] = None,
+        risk: Optional[str] = None,
+        environment: Optional[str] = None,
+    ) -> "list[Asset]":
+        """``GET /v1/assets`` — one page of discovered assets."""
+        params = _strip_none(
+            {
+                "limit": limit,
+                "cursor": cursor,
+                "provider": provider,
+                "type": type,
+                "risk": risk,
+                "environment": environment,
+            }
+        )
+        body = self._client._request("GET", "/v1/assets", params=params)
+        return [_row_to_asset(row) for row in body["data"]]
+
+    def iter_all(
+        self,
+        *,
+        page_size: int = 100,
+        provider: Optional[str] = None,
+        type: Optional[str] = None,
+        risk: Optional[str] = None,
+        environment: Optional[str] = None,
+    ) -> Iterator[Asset]:
+        cursor: Optional[str] = None
+        while True:
+            params = _strip_none(
+                {
+                    "limit": page_size,
+                    "cursor": cursor,
+                    "provider": provider,
+                    "type": type,
+                    "risk": risk,
+                    "environment": environment,
+                }
+            )
+            body = self._client._request("GET", "/v1/assets", params=params)
+            for row in body["data"]:
+                yield _row_to_asset(row)
+            cursor = (body.get("pagination") or {}).get("nextCursor")
+            if not cursor:
+                return
+
+
+class KeysResource:
+    """Operations under ``/v1/keys``."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def list(
+        self,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+        provider: Optional[str] = None,
+        algorithm: Optional[str] = None,
+        risk: Optional[str] = None,
+    ) -> "list[Key]":
+        """``GET /v1/keys`` — one page of discovered cryptographic keys."""
+        params = _strip_none(
+            {
+                "limit": limit,
+                "cursor": cursor,
+                "provider": provider,
+                "algorithm": algorithm,
+                "risk": risk,
+            }
+        )
+        body = self._client._request("GET", "/v1/keys", params=params)
+        return [_row_to_key(row) for row in body["data"]]
+
+    def iter_all(
+        self,
+        *,
+        page_size: int = 100,
+        provider: Optional[str] = None,
+        algorithm: Optional[str] = None,
+        risk: Optional[str] = None,
+    ) -> Iterator[Key]:
+        cursor: Optional[str] = None
+        while True:
+            params = _strip_none(
+                {
+                    "limit": page_size,
+                    "cursor": cursor,
+                    "provider": provider,
+                    "algorithm": algorithm,
+                    "risk": risk,
+                }
+            )
+            body = self._client._request("GET", "/v1/keys", params=params)
+            for row in body["data"]:
+                yield _row_to_key(row)
+            cursor = (body.get("pagination") or {}).get("nextCursor")
+            if not cursor:
+                return
+
+
+def _strip_none(d: Mapping[str, Any]) -> "dict[str, Any]":
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def _row_to_asset(row: Mapping[str, Any]) -> Asset:
+    return Asset(
+        id=row["id"],
+        name=row["name"],
+        type=row["type"],
+        algorithm=row["algorithm"],
+        risk=row["risk"],
+        environment=row["environment"],
+        pq_ready=bool(row.get("pqReady", False)),
+        created_at=row["createdAt"],
+        updated_at=row["updatedAt"],
+        provider=row.get("provider"),
+        external_id=row.get("externalId"),
+        region=row.get("region"),
+        last_scanned=row.get("lastScanned"),
+        scan_id=row.get("scanId"),
+        metadata=dict(row.get("metadata") or {}),
+    )
+
+
+def _row_to_key(row: Mapping[str, Any]) -> Key:
+    return Key(
+        id=row["id"],
+        provider=row["provider"],
+        external_id=row["externalId"],
+        algorithm=row["algorithm"],
+        pq_safe=bool(row.get("pqSafe", False)),
+        risk=row["risk"],
+        first_seen=row["firstSeen"],
+        last_seen=row["lastSeen"],
+        region=row.get("region"),
+        key_size=row.get("keySize"),
+        key_usage=row.get("keyUsage"),
+        scan_id=row.get("scanId"),
+        metadata=dict(row.get("metadata") or {}),
+    )

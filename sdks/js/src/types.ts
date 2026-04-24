@@ -97,3 +97,92 @@ export interface HealthResult {
   version?: string;
   [key: string]: unknown;
 }
+
+/* ────────────────────────────── Assets ────────────────────────────── */
+
+/** Where an asset / key was discovered. */
+export type Provider =
+  | "aws"
+  | "azure"
+  | "gcp"
+  | "kubernetes"
+  | "github"
+  | "vault"
+  | "url"
+  | "other";
+
+/** Coarse classification of a discovered asset. */
+export type AssetType = "ENDPOINT" | "CERTIFICATE" | "KEY" | "DATA_STORE";
+
+/** Risk level on individual cloud resources (uppercase, mirrors API). */
+export type ResourceRisk = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NONE";
+
+/** A single row returned by `assets.list()`. */
+export interface Asset {
+  id: string;
+  provider: Provider | null;
+  externalId: string | null;
+  name: string;
+  type: AssetType;
+  algorithm: string;
+  risk: ResourceRisk;
+  environment: string;
+  region: string | null;
+  lastScanned: string | null;
+  pqReady: boolean;
+  scanId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Filters for `assets.list()`. */
+export interface AssetListOptions {
+  limit?: number;
+  cursor?: string;
+  provider?: Provider;
+  type?: AssetType;
+  risk?: ResourceRisk;
+  environment?: string;
+}
+
+export interface AssetListResult {
+  data: Asset[];
+  pagination: Pagination;
+}
+
+/* ──────────────────────────────── Keys ─────────────────────────────── */
+
+/** Subset of providers that can have managed cryptographic keys. */
+export type KeyProvider = "aws" | "azure" | "gcp" | "kubernetes" | "vault" | "other";
+
+/** A discovered cryptographic key. */
+export interface Key {
+  id: string;
+  provider: KeyProvider;
+  externalId: string;
+  region: string | null;
+  algorithm: string;
+  keySize: number | null;
+  keyUsage: string | null;
+  pqSafe: boolean;
+  risk: RiskLevel;
+  scanId: string | null;
+  metadata: Record<string, unknown>;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+/** Filters for `keys.list()`. */
+export interface KeyListOptions {
+  limit?: number;
+  cursor?: string;
+  provider?: KeyProvider;
+  algorithm?: string;
+  risk?: RiskLevel;
+}
+
+export interface KeyListResult {
+  data: Key[];
+  pagination: Pagination;
+}

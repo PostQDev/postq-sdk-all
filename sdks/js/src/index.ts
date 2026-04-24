@@ -1,4 +1,4 @@
-export { PostQ, ScansResource } from "./client";
+export { PostQ, ScansResource, AssetsResource, KeysResource } from "./client";
 export {
   PostQError,
   PostQConfigError,
@@ -22,4 +22,14 @@ export type {
   ScanListResult,
   Pagination,
   HealthResult,
+  Provider,
+  AssetType,
+  ResourceRisk,
+  Asset,
+  AssetListOptions,
+  AssetListResult,
+  KeyProvider,
+  Key,
+  KeyListOptions,
+  KeyListResult,
 } from "./types";

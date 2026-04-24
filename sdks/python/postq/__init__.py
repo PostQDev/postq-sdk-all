@@ -22,9 +22,9 @@ Example::
 """
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-from .client import PostQ, ScansResource
+from .client import AssetsResource, KeysResource, PostQ, ScansResource
 from .errors import (
     PostQAuthError,
     PostQConfigError,
@@ -34,12 +34,14 @@ from .errors import (
     PostQRateLimitError,
     PostQServerError,
 )
-from .models import Finding, ScanListItem, ScanSubmitResult
+from .models import Asset, Finding, Key, ScanListItem, ScanSubmitResult
 
 __all__ = [
     "__version__",
     "PostQ",
     "ScansResource",
+    "AssetsResource",
+    "KeysResource",
     "PostQError",
     "PostQConfigError",
     "PostQAuthError",
@@ -50,4 +52,6 @@ __all__ = [
     "Finding",
     "ScanListItem",
     "ScanSubmitResult",
+    "Asset",
+    "Key",
 ]

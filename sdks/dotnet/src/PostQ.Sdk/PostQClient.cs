@@ -45,6 +45,12 @@ public sealed class PostQClient : IDisposable
     /// <summary>Operations under <c>/v1/scans</c>.</summary>
     public ScansResource Scans { get; }
 
+    /// <summary>Operations under <c>/v1/assets</c>.</summary>
+    public AssetsResource Assets { get; }
+
+    /// <summary>Operations under <c>/v1/keys</c>.</summary>
+    public KeysResource Keys { get; }
+
     /// <summary>Construct a new client.</summary>
     /// <param name="options">Required configuration. Must include an API key.</param>
     /// <param name="httpClient">
@@ -70,6 +76,8 @@ public sealed class PostQClient : IDisposable
             new ProductInfoHeaderValue("postq-sdk-dotnet", SdkVersion));
 
         Scans = new ScansResource(this);
+        Assets = new AssetsResource(this);
+        Keys = new KeysResource(this);
     }
 
     /// <summary>Hit <c>GET /health</c>. Throws if the API is down.</summary>
@@ -251,6 +259,120 @@ public sealed class ScansResource
         while (true)
         {
             var page = await ListAsync(pageSize, cursor, ct).ConfigureAwait(false);
+            foreach (var item in page.Data) yield return item;
+            if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
+            cursor = page.Pagination.NextCursor;
+        }
+    }
+}
+
+/// <summary>Operations under <c>/v1/assets</c>.</summary>
+public sealed class AssetsResource
+{
+    private readonly PostQClient _client;
+
+    internal AssetsResource(PostQClient client) => _client = client;
+
+    /// <summary><c>GET /v1/assets</c> — one page of discovered assets.</summary>
+    public async Task<AssetListResult> ListAsync(
+        AssetListOptions? options = null,
+        CancellationToken ct = default)
+    {
+        var opts = options ?? new AssetListOptions();
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = opts.Limit.ToString(),
+            ["cursor"] = opts.Cursor,
+            ["provider"] = opts.Provider,
+            ["type"] = opts.Type,
+            ["risk"] = opts.Risk,
+            ["environment"] = opts.Environment,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<Asset>>>(HttpMethod.Get, "/v1/assets", null, query, ct)
+            .ConfigureAwait(false);
+        return new AssetListResult
+        {
+            Data = envelope?.Data ?? new List<Asset>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = opts.Limit },
+        };
+    }
+
+    /// <summary>Async stream over every asset, walking the cursor automatically.</summary>
+    public async IAsyncEnumerable<Asset> IterAllAsync(
+        AssetListOptions? options = null,
+        int pageSize = 100,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        string? cursor = null;
+        while (true)
+        {
+            var pageOpts = new AssetListOptions
+            {
+                Limit = pageSize,
+                Cursor = cursor,
+                Provider = options?.Provider,
+                Type = options?.Type,
+                Risk = options?.Risk,
+                Environment = options?.Environment,
+            };
+            var page = await ListAsync(pageOpts, ct).ConfigureAwait(false);
+            foreach (var item in page.Data) yield return item;
+            if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
+            cursor = page.Pagination.NextCursor;
+        }
+    }
+}
+
+/// <summary>Operations under <c>/v1/keys</c>.</summary>
+public sealed class KeysResource
+{
+    private readonly PostQClient _client;
+
+    internal KeysResource(PostQClient client) => _client = client;
+
+    /// <summary><c>GET /v1/keys</c> — one page of discovered cryptographic keys.</summary>
+    public async Task<KeyListResult> ListAsync(
+        KeyListOptions? options = null,
+        CancellationToken ct = default)
+    {
+        var opts = options ?? new KeyListOptions();
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = opts.Limit.ToString(),
+            ["cursor"] = opts.Cursor,
+            ["provider"] = opts.Provider,
+            ["algorithm"] = opts.Algorithm,
+            ["risk"] = opts.Risk,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<Key>>>(HttpMethod.Get, "/v1/keys", null, query, ct)
+            .ConfigureAwait(false);
+        return new KeyListResult
+        {
+            Data = envelope?.Data ?? new List<Key>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = opts.Limit },
+        };
+    }
+
+    /// <summary>Async stream over every key, walking the cursor automatically.</summary>
+    public async IAsyncEnumerable<Key> IterAllAsync(
+        KeyListOptions? options = null,
+        int pageSize = 100,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        string? cursor = null;
+        while (true)
+        {
+            var pageOpts = new KeyListOptions
+            {
+                Limit = pageSize,
+                Cursor = cursor,
+                Provider = options?.Provider,
+                Algorithm = options?.Algorithm,
+                Risk = options?.Risk,
+            };
+            var page = await ListAsync(pageOpts, ct).ConfigureAwait(false);
             foreach (var item in page.Data) yield return item;
             if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
             cursor = page.Pagination.NextCursor;

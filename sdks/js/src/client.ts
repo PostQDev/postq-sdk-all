@@ -14,10 +14,16 @@ import {
   ScanListResult,
   ScanSubmitInput,
   ScanSubmitResult,
+  Asset,
+  AssetListOptions,
+  AssetListResult,
+  Key,
+  KeyListOptions,
+  KeyListResult,
 } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.postq.dev";
-const SDK_VERSION = "0.2.0";
+const SDK_VERSION = "0.3.0";
 
 /**
  * PostQ SDK client.
@@ -42,6 +48,8 @@ const SDK_VERSION = "0.2.0";
  */
 export class PostQ {
   readonly scans: ScansResource;
+  readonly assets: AssetsResource;
+  readonly keys: KeysResource;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -67,6 +75,8 @@ export class PostQ {
     this.fetchImpl = f.bind(globalThis);
 
     this.scans = new ScansResource(this);
+    this.assets = new AssetsResource(this);
+    this.keys = new KeysResource(this);
   }
 
   /** Hit `GET /health`. Throws if the API is down. */
@@ -78,7 +88,7 @@ export class PostQ {
   async request<T>(
     method: "GET" | "POST",
     path: string,
-    opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {},
+    opts: { body?: unknown; query?: Record<string, string | number | boolean | undefined> } = {},
   ): Promise<T> {
     const url = new URL(this.baseUrl + path);
     if (opts.query) {
@@ -194,6 +204,87 @@ export class ScansResource {
     const limit = opts.pageSize ?? 100;
     while (true) {
       const page = await this.list({ limit, cursor });
+      for (const row of page.data) yield row;
+      if (!page.pagination.nextCursor) return;
+      cursor = page.pagination.nextCursor;
+    }
+  }
+}
+
+/**
+ * Assets resource — list every cryptographic asset PostQ has discovered for
+ * your org (TLS certificates, KMS keys, K8s secrets, …).
+ */
+export class AssetsResource {
+  constructor(private readonly client: PostQ) {}
+
+  /** `GET /v1/assets` — one page of assets. */
+  async list(opts: AssetListOptions = {}): Promise<AssetListResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: Asset[];
+      pagination: { limit: number; nextCursor: string | null };
+    }>("GET", "/v1/assets", {
+      query: {
+        limit: opts.limit ?? 20,
+        cursor: opts.cursor,
+        provider: opts.provider,
+        type: opts.type,
+        risk: opts.risk,
+        environment: opts.environment,
+      },
+    });
+    return { data: envelope.data, pagination: envelope.pagination };
+  }
+
+  /** Walk every asset across pages. */
+  async *iterAll(
+    opts: AssetListOptions & { pageSize?: number } = {},
+  ): AsyncIterableIterator<Asset> {
+    let cursor: string | undefined;
+    const limit = opts.pageSize ?? 100;
+    while (true) {
+      const page = await this.list({ ...opts, limit, cursor });
+      for (const row of page.data) yield row;
+      if (!page.pagination.nextCursor) return;
+      cursor = page.pagination.nextCursor;
+    }
+  }
+}
+
+/**
+ * Keys resource — list every managed cryptographic key (KMS / Key Vault /
+ * Vault Transit / etc.) PostQ has discovered for your org.
+ */
+export class KeysResource {
+  constructor(private readonly client: PostQ) {}
+
+  /** `GET /v1/keys` — one page of discovered keys. */
+  async list(opts: KeyListOptions = {}): Promise<KeyListResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: Key[];
+      pagination: { limit: number; nextCursor: string | null };
+    }>("GET", "/v1/keys", {
+      query: {
+        limit: opts.limit ?? 20,
+        cursor: opts.cursor,
+        provider: opts.provider,
+        algorithm: opts.algorithm,
+        risk: opts.risk,
+      },
+    });
+    return { data: envelope.data, pagination: envelope.pagination };
+  }
+
+  /** Walk every key across pages. */
+  async *iterAll(
+    opts: KeyListOptions & { pageSize?: number } = {},
+  ): AsyncIterableIterator<Key> {
+    let cursor: string | undefined;
+    const limit = opts.pageSize ?? 100;
+    while (true) {
+      const page = await this.list({ ...opts, limit, cursor });
       for (const row of page.data) yield row;
       if (!page.pagination.nextCursor) return;
       cursor = page.pagination.nextCursor;

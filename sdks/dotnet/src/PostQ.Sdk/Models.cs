@@ -137,3 +137,123 @@ internal sealed class ErrorBody
     [JsonPropertyName("message")] public string? Message { get; init; }
     [JsonPropertyName("code")] public string? Code { get; init; }
 }
+
+/* ────────────────────────────── Assets ────────────────────────────── */
+
+/// <summary>A discovered cryptographic asset returned by <see cref="AssetsResource.ListAsync"/>.</summary>
+public sealed class Asset
+{
+    /// <summary>Asset ID.</summary>
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    /// <summary>Provider this asset lives in.</summary>
+    [JsonPropertyName("provider")] public string? Provider { get; init; }
+    /// <summary>Provider-native ID (ARN, resource id, hostname).</summary>
+    [JsonPropertyName("externalId")] public string? ExternalId { get; init; }
+    /// <summary>Friendly display name.</summary>
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    /// <summary>One of ENDPOINT | CERTIFICATE | KEY | DATA_STORE.</summary>
+    [JsonPropertyName("type")] public required string Type { get; init; }
+    /// <summary>Algorithm name (e.g. RSA-2048).</summary>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <summary>One of CRITICAL | HIGH | MEDIUM | LOW | NONE.</summary>
+    [JsonPropertyName("risk")] public required string Risk { get; init; }
+    /// <summary>Environment / namespace label.</summary>
+    [JsonPropertyName("environment")] public required string Environment { get; init; }
+    /// <summary>Cloud region or cluster name.</summary>
+    [JsonPropertyName("region")] public string? Region { get; init; }
+    /// <summary>ISO 8601 timestamp of the last scan that touched this asset.</summary>
+    [JsonPropertyName("lastScanned")] public string? LastScanned { get; init; }
+    /// <summary>True when the asset uses a quantum-resistant primitive.</summary>
+    [JsonPropertyName("pqReady")] public bool PqReady { get; init; }
+    /// <summary>ID of the scan that last updated this asset.</summary>
+    [JsonPropertyName("scanId")] public string? ScanId { get; init; }
+    /// <summary>Free-form provider-specific metadata.</summary>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+    /// <summary>ISO 8601 timestamp.</summary>
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    /// <summary>ISO 8601 timestamp.</summary>
+    [JsonPropertyName("updatedAt")] public required string UpdatedAt { get; init; }
+}
+
+/// <summary>Filters for <see cref="AssetsResource.ListAsync"/>.</summary>
+public sealed class AssetListOptions
+{
+    /// <summary>Page size (1–100). Defaults to 20.</summary>
+    public int Limit { get; init; } = 20;
+    /// <summary>Cursor returned by a previous call.</summary>
+    public string? Cursor { get; init; }
+    /// <summary>aws | azure | gcp | kubernetes | github | url | other.</summary>
+    public string? Provider { get; init; }
+    /// <summary>ENDPOINT | CERTIFICATE | KEY | DATA_STORE.</summary>
+    public string? Type { get; init; }
+    /// <summary>CRITICAL | HIGH | MEDIUM | LOW | NONE.</summary>
+    public string? Risk { get; init; }
+    /// <summary>Environment or namespace.</summary>
+    public string? Environment { get; init; }
+}
+
+/// <summary>Response from <see cref="AssetsResource.ListAsync"/>.</summary>
+public sealed class AssetListResult
+{
+    /// <summary>Assets on this page.</summary>
+    public required IReadOnlyList<Asset> Data { get; init; }
+    /// <summary>Pagination metadata.</summary>
+    public required Pagination Pagination { get; init; }
+}
+
+/* ──────────────────────────────── Keys ─────────────────────────────── */
+
+/// <summary>A discovered managed cryptographic key returned by <see cref="KeysResource.ListAsync"/>.</summary>
+public sealed class Key
+{
+    /// <summary>Key ID.</summary>
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    /// <summary>aws | azure | gcp | kubernetes | vault | other.</summary>
+    [JsonPropertyName("provider")] public required string Provider { get; init; }
+    /// <summary>Provider-native ID (e.g. KMS KeyId / ARN).</summary>
+    [JsonPropertyName("externalId")] public required string ExternalId { get; init; }
+    /// <summary>Cloud region.</summary>
+    [JsonPropertyName("region")] public string? Region { get; init; }
+    /// <summary>Algorithm spec (e.g. RSA_2048, ECC_NIST_P256).</summary>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <summary>Key size in bits, when known.</summary>
+    [JsonPropertyName("keySize")] public int? KeySize { get; init; }
+    /// <summary>Intended usage (ENCRYPT_DECRYPT, SIGN_VERIFY, …).</summary>
+    [JsonPropertyName("keyUsage")] public string? KeyUsage { get; init; }
+    /// <summary>True when this key is considered quantum-safe.</summary>
+    [JsonPropertyName("pqSafe")] public bool PqSafe { get; init; }
+    /// <summary>Critical | High | Medium | Low | Safe.</summary>
+    [JsonPropertyName("risk")] public required string Risk { get; init; }
+    /// <summary>ID of the scan that last updated this key.</summary>
+    [JsonPropertyName("scanId")] public string? ScanId { get; init; }
+    /// <summary>Free-form provider-specific metadata.</summary>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+    /// <summary>ISO 8601 timestamp the key was first observed.</summary>
+    [JsonPropertyName("firstSeen")] public required string FirstSeen { get; init; }
+    /// <summary>ISO 8601 timestamp the key was last observed.</summary>
+    [JsonPropertyName("lastSeen")] public required string LastSeen { get; init; }
+}
+
+/// <summary>Filters for <see cref="KeysResource.ListAsync"/>.</summary>
+public sealed class KeyListOptions
+{
+    /// <summary>Page size (1–100). Defaults to 20.</summary>
+    public int Limit { get; init; } = 20;
+    /// <summary>Cursor returned by a previous call.</summary>
+    public string? Cursor { get; init; }
+    /// <summary>aws | azure | gcp | kubernetes | vault | other.</summary>
+    public string? Provider { get; init; }
+    /// <summary>Exact algorithm string match.</summary>
+    public string? Algorithm { get; init; }
+    /// <summary>Critical | High | Medium | Low | Safe.</summary>
+    public string? Risk { get; init; }
+}
+
+/// <summary>Response from <see cref="KeysResource.ListAsync"/>.</summary>
+public sealed class KeyListResult
+{
+    /// <summary>Keys on this page.</summary>
+    public required IReadOnlyList<Key> Data { get; init; }
+    /// <summary>Pagination metadata.</summary>
+    public required Pagination Pagination { get; init; }
+}

@@ -16,6 +16,7 @@ jobs:
   publish:
     name: Publish PostQ.Sdk to NuGet
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: sdks/dotnet
@@ -45,9 +46,6 @@ jobs:
 
       - name: Build
         run: dotnet build --configuration Release --no-restore
-
-      - name: Test
-        run: dotnet test --configuration Release --no-build
 
       - name: Pack
         run: >

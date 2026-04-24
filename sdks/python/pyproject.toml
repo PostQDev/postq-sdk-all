@@ -30,7 +30,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://postq.io"
+Homepage = "https://postq.dev"
 Documentation = "https://github.com/PostQDev/postq-sdk-all/tree/main/sdks/python#readme"
 Repository = "https://github.com/PostQDev/postq-sdk-all"
 "Bug Tracker" = "https://github.com/PostQDev/postq-sdk-all/issues"

@@ -25,7 +25,7 @@ public sealed class PostQClientOptions
     public string Environment { get; init; } = "production";
 
     /// <summary>Override the base URL. Useful for testing against a local server.</summary>
-    public string BaseUrl { get; init; } = "https://api.postq.io/v1";
+    public string BaseUrl { get; init; } = "https://api.postq.dev/v1";
 }
 
 /// <summary>Request body for POST /v1/sign.</summary>

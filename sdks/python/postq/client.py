@@ -11,7 +11,7 @@ import urllib3
 from .errors import PostQConfigError, PostQError
 from .models import ListKeysResponse, ScanResponse, SignResponse, VerifyResponse
 
-_DEFAULT_BASE_URL = "https://api.postq.io/v1"
+_DEFAULT_BASE_URL = "https://api.postq.dev/v1"
 _DEFAULT_ENVIRONMENT = "production"
 
 

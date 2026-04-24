@@ -4,7 +4,7 @@ Official PostQ SDKs for JavaScript/TypeScript, Python, and .NET — quantum-safe
 
 PostQ provides a REST API and SDKs for integrating quantum-safe cryptography into your applications, supporting hybrid signing (classical + post-quantum), key management, cryptographic scanning, and policy enforcement.
 
-All API endpoints are available at `https://api.postq.io/v1` and require authentication via Bearer token.
+All API endpoints are available at `https://api.postq.dev/v1` and require authentication via Bearer token.
 
 ---
 

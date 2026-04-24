@@ -44,7 +44,7 @@ print(result.valid)
 |---|---|---|---|---|
 | `api_key` | `str` | ✅ | — | PostQ API key |
 | `environment` | `str` | ❌ | `"production"` | Target environment |
-| `base_url` | `str` | ❌ | `https://api.postq.io/v1` | Override base URL |
+| `base_url` | `str` | ❌ | `https://api.postq.dev/v1` | Override base URL |
 
 ### `pq.sign(payload, algorithm, key_id, context=None)`
 

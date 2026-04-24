@@ -11,7 +11,7 @@ import {
 } from "./types";
 import { PostQConfigError, PostQError } from "./errors";
 
-const DEFAULT_BASE_URL = "https://api.postq.io/v1";
+const DEFAULT_BASE_URL = "https://api.postq.dev/v1";
 const DEFAULT_ENVIRONMENT = "production";
 
 /**

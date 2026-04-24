@@ -50,7 +50,7 @@ Console.WriteLine(result.Valid);
 |---|---|---|---|---|
 | `ApiKey` | `string` | ✅ | — | PostQ API key |
 | `Environment` | `string` | ❌ | `"production"` | Target environment |
-| `BaseUrl` | `string` | ❌ | `https://api.postq.io/v1` | Override base URL |
+| `BaseUrl` | `string` | ❌ | `https://api.postq.dev/v1` | Override base URL |
 
 Pass a custom `HttpClient` for testing or to configure timeouts, proxies, etc.
 

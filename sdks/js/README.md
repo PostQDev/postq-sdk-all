@@ -47,7 +47,7 @@ console.log(result.valid);
 |---|---|---|---|---|
 | `apiKey` | `string` | ✅ | — | PostQ API key |
 | `environment` | `"production" \| "staging" \| "development"` | ❌ | `"production"` | Target environment |
-| `baseUrl` | `string` | ❌ | `https://api.postq.io/v1` | Override base URL |
+| `baseUrl` | `string` | ❌ | `https://api.postq.dev/v1` | Override base URL |
 
 ### `pq.sign(input)`
 

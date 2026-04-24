@@ -24,7 +24,7 @@ const SDK_VERSION = "0.2.0";
  *
  * @example
  * ```ts
- * import { PostQ } from "postq";
+ * import { PostQ } from "@postq/sdk";
  *
  * const pq = new PostQ({ apiKey: process.env.POSTQ_API_KEY! });
  *

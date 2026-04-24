@@ -1,79 +1,82 @@
 # @postq/sdk
 
-Official PostQ SDK for JavaScript/TypeScript — quantum-safe cryptography for your applications.
-
-## Installation
+Official PostQ SDK for JavaScript and TypeScript. Submit quantum-risk scans and read results from the [PostQ API](https://api.postq.dev).
 
 ```bash
 npm install @postq/sdk
 ```
 
-## Quick start
+## Quickstart
 
-```typescript
+```ts
 import { PostQ } from "@postq/sdk";
 
-const pq = new PostQ({
-  apiKey: process.env.POSTQ_API_KEY!,
-  environment: "production",
+const pq = new PostQ({ apiKey: process.env.POSTQ_API_KEY! });
+
+// Submit a scan
+const result = await pq.scans.submit({
+  type: "url",
+  target: "example.com",
+  riskScore: 85,
+  riskLevel: "High",
+  findings: [
+    { severity: "high", title: "RSA-2048 public key" },
+  ],
 });
+console.log(result.url); // https://app.postq.dev/scans/...
 
-// Sign a message with hybrid cryptography
-const signature = await pq.sign({
-  payload: Buffer.from("Hello Quantum World"),
-  algorithm: "dilithium3+ed25519",
-  keyId: "vault://signing/production",
-});
+// List recent scans
+const page = await pq.scans.list({ limit: 10 });
+for (const scan of page.data) {
+  console.log(scan.target, scan.riskLevel);
+}
 
-console.log(signature.algorithm);
-// → "dilithium3+ed25519"
-
-// Verify the hybrid signature
-const result = await pq.verify({
-  payload: Buffer.from("Hello Quantum World"),
-  signature: signature.signature,
-  keyId: "vault://signing/production",
-});
-
-console.log(result.valid);
-// → true
+// Iterate every scan with automatic pagination
+for await (const scan of pq.scans.iterAll()) {
+  // ...
+}
 ```
 
-## API
+## Configuration
 
-### `new PostQ(options)`
+| Option      | Default                  | Notes                                       |
+| ----------- | ------------------------ | ------------------------------------------- |
+| `apiKey`    | _required_               | `pq_live_…` from your PostQ dashboard       |
+| `baseUrl`   | `https://api.postq.dev`  | Override for staging or self-hosted         |
+| `timeoutMs` | `30000`                  | Per-request timeout                         |
+| `fetch`     | `globalThis.fetch`       | Pass a custom fetch (testing, polyfill)     |
 
-| Option | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `apiKey` | `string` | ✅ | — | PostQ API key |
-| `environment` | `"production" \| "staging" \| "development"` | ❌ | `"production"` | Target environment |
-| `baseUrl` | `string` | ❌ | `https://api.postq.dev/v1` | Override base URL |
+## Errors
 
-### `pq.sign(input)`
+All errors extend `PostQError`. Catch the base class to catch them all:
 
-Create a hybrid signature combining a classical and a post-quantum algorithm.
+```ts
+import { PostQ, PostQAuthError, PostQRateLimitError } from "@postq/sdk";
 
-### `pq.verify(input)`
-
-Verify a hybrid signature. Returns validity of both components independently.
-
-### `pq.listKeys()`
-
-List all cryptographic keys managed by PostQ.
-
-### `pq.scan(input)`
-
-Trigger a quantum risk scan across specified infrastructure targets.
-
-## Development
-
-```bash
-npm install
-npm run lint   # TypeScript type-check
-npm test       # Run Jest tests
-npm run build  # Compile TypeScript to dist/
+try {
+  await pq.scans.list();
+} catch (err) {
+  if (err instanceof PostQAuthError)      console.error("bad API key");
+  else if (err instanceof PostQRateLimitError) console.error("slow down");
+  else throw err;
+}
 ```
+
+| Class                  | When                                  |
+| ---------------------- | ------------------------------------- |
+| `PostQConfigError`     | Missing/invalid constructor input     |
+| `PostQAuthError`       | 401 — bad, revoked, or expired key    |
+| `PostQNotFoundError`   | 404                                   |
+| `PostQRateLimitError`  | 429                                   |
+| `PostQServerError`     | 5xx                                   |
+| `PostQNetworkError`    | DNS, connection refused, timeout      |
+| `PostQError`           | Base class, thrown for any other 4xx  |
+
+## Requirements
+
+- Node 18+ (uses global `fetch`). For older Node, pass a `fetch` polyfill.
+- TypeScript 5.0+ (types are bundled).
 
 ## License
 
-MIT
+MIT — see [LICENSE](../../LICENSE).

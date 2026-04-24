@@ -5,10 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>PostQ.Sdk</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>PostQ</Authors>
-    <Description>Official PostQ SDK for .NET — quantum-safe cryptography for your applications</Description>
-    <PackageTags>postq;quantum;cryptography;post-quantum;dilithium;signing;sdk</PackageTags>
+    <Description>Official PostQ SDK for .NET — submit quantum-risk scans and read results from the PostQ API.</Description>
+    <PackageTags>postq;quantum;cryptography;post-quantum;security;tls;scanner;sdk</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/PostQDev/postq-sdk-all/tree/main/sdks/dotnet</PackageProjectUrl>
     <RepositoryUrl>https://github.com/PostQDev/postq-sdk-all.git</RepositoryUrl>
@@ -22,7 +22,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

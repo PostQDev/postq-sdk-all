@@ -1,18 +1,23 @@
 import {
+  PostQAuthError,
+  PostQConfigError,
+  PostQError,
+  PostQNetworkError,
+  PostQNotFoundError,
+  PostQRateLimitError,
+  PostQServerError,
+} from "./errors";
+import {
+  HealthResult,
   PostQOptions,
-  SignInput,
-  SignResponse,
-  VerifyInput,
-  VerifyResponse,
-  ListKeysResponse,
-  ScanInput,
-  ScanResponse,
-  PostQApiError,
+  ScanListItem,
+  ScanListResult,
+  ScanSubmitInput,
+  ScanSubmitResult,
 } from "./types";
-import { PostQConfigError, PostQError } from "./errors";
 
-const DEFAULT_BASE_URL = "https://api.postq.dev/v1";
-const DEFAULT_ENVIRONMENT = "production";
+const DEFAULT_BASE_URL = "https://api.postq.dev";
+const SDK_VERSION = "0.2.0";
 
 /**
  * PostQ SDK client.
@@ -23,148 +28,175 @@ const DEFAULT_ENVIRONMENT = "production";
  *
  * const pq = new PostQ({ apiKey: process.env.POSTQ_API_KEY! });
  *
- * const signature = await pq.sign({
- *   payload: Buffer.from("Hello Quantum World"),
- *   algorithm: "dilithium3+ed25519",
- *   keyId: "vault://signing/production",
+ * const result = await pq.scans.submit({
+ *   type: "url",
+ *   target: "example.com",
+ *   riskScore: 85,
+ *   riskLevel: "High",
+ *   findings: [
+ *     { severity: "high", title: "RSA-2048 public key" },
+ *   ],
  * });
+ * console.log(result.url);
  * ```
  */
 export class PostQ {
+  readonly scans: ScansResource;
+
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly environment: string;
+  private readonly timeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
 
   constructor(options: PostQOptions) {
-    if (!options.apiKey || options.apiKey.trim() === "") {
+    if (!options || !options.apiKey || options.apiKey.trim() === "") {
       throw new PostQConfigError(
-        "apiKey is required. Provide it via the PostQ constructor options."
+        "apiKey is required. Pass it explicitly or set POSTQ_API_KEY in your environment.",
       );
     }
-    this.apiKey = options.apiKey;
-    this.environment = options.environment ?? DEFAULT_ENVIRONMENT;
-    this.baseUrl = options.baseUrl?.replace(/\/$/, "") ?? DEFAULT_BASE_URL;
-  }
+    this.apiKey = options.apiKey.trim();
+    this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+    this.timeoutMs = options.timeoutMs ?? 30000;
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Create a hybrid signature combining a classical and a post-quantum algorithm.
-   *
-   * @param input - Signing parameters.
-   * @returns The composite signature plus metadata.
-   */
-  async sign(input: SignInput): Promise<SignResponse> {
-    const body: Record<string, unknown> = {
-      payload: this.toBase64(input.payload),
-      algorithm: input.algorithm,
-      key_id: input.keyId,
-    };
-    if (input.context) {
-      body.context = input.context;
+    const f = options.fetch ?? globalThis.fetch;
+    if (typeof f !== "function") {
+      throw new PostQConfigError(
+        "global fetch is not available. Pass `fetch` in PostQOptions or use Node 18+.",
+      );
     }
-    return this.request<SignResponse>("POST", "/sign", body);
+    this.fetchImpl = f.bind(globalThis);
+
+    this.scans = new ScansResource(this);
   }
 
-  /**
-   * Verify a hybrid signature.
-   *
-   * @param input - Verification parameters.
-   * @returns Validity information for both signature components.
-   */
-  async verify(input: VerifyInput): Promise<VerifyResponse> {
-    return this.request<VerifyResponse>("POST", "/verify", {
-      payload: this.toBase64(input.payload),
-      signature: input.signature,
-      key_id: input.keyId,
-    });
+  /** Hit `GET /health`. Throws if the API is down. */
+  async health(): Promise<HealthResult> {
+    return this.request<HealthResult>("GET", "/health");
   }
 
-  /**
-   * List all cryptographic keys managed by PostQ.
-   *
-   * @returns List of keys with algorithm and PQ-readiness metadata.
-   */
-  async listKeys(): Promise<ListKeysResponse> {
-    return this.request<ListKeysResponse>("GET", "/keys");
-  }
-
-  /**
-   * Trigger a quantum risk scan across specified infrastructure targets.
-   *
-   * @param input - Scan parameters.
-   * @returns Scan job identifier and results summary.
-   */
-  async scan(input: ScanInput): Promise<ScanResponse> {
-    return this.request<ScanResponse>("POST", "/scan", {
-      targets: input.targets,
-      depth: input.depth ?? "full",
-      include: input.include ?? ["tls", "signing", "encryption"],
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // Private helpers
-  // ---------------------------------------------------------------------------
-
-  private buildHeaders(): Record<string, string> {
-    return {
-      Authorization: `Bearer ${this.apiKey}`,
-      "Content-Type": "application/json",
-      "X-PostQ-Environment": this.environment,
-    };
-  }
-
-  private toBase64(data: Buffer | Uint8Array): string {
-    return Buffer.from(data).toString("base64");
-  }
-
-  private async request<T>(
+  /** @internal */
+  async request<T>(
     method: "GET" | "POST",
     path: string,
-    body?: Record<string, unknown>
+    opts: { body?: unknown; query?: Record<string, string | number | undefined> } = {},
   ): Promise<T> {
-    const url = `${this.baseUrl}${path}`;
-    const init: RequestInit = {
-      method,
-      headers: this.buildHeaders(),
-    };
-    if (body !== undefined) {
-      init.body = JSON.stringify(body);
+    const url = new URL(this.baseUrl + path);
+    if (opts.query) {
+      for (const [k, v] of Object.entries(opts.query)) {
+        if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+      }
     }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     let response: Response;
     try {
-      response = await fetch(url, init);
+      response = await this.fetchImpl(url.toString(), {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
+        },
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+        signal: controller.signal,
+      });
     } catch (err) {
-      throw new PostQError(
-        `Network error while calling ${method} ${path}: ${(err as Error).message}`,
-        0
-      );
+      const e = err as { name?: string; message?: string };
+      if (e.name === "AbortError") {
+        throw new PostQNetworkError(
+          `${method} ${path} timed out after ${this.timeoutMs}ms`,
+        );
+      }
+      throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
+    } finally {
+      clearTimeout(timer);
     }
 
     const text = await response.text();
     let json: unknown;
-    try {
-      json = JSON.parse(text);
-    } catch {
-      throw new PostQError(
-        `Unexpected non-JSON response from ${method} ${path}: ${text}`,
-        response.status
-      );
+    if (text) {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new PostQError(
+          `Non-JSON response from ${method} ${path}: ${text.slice(0, 200)}`,
+          { status: response.status },
+        );
+      }
     }
 
     if (!response.ok) {
-      const apiErr = json as Partial<PostQApiError>;
-      throw new PostQError(
-        apiErr.message ?? `Request failed with status ${response.status}`,
-        response.status,
-        apiErr.code
-      );
+      const body = (json ?? {}) as { error?: string; message?: string; code?: string };
+      const message = body.error ?? body.message ?? `HTTP ${response.status}`;
+      const code = body.code;
+      switch (response.status) {
+        case 401:
+          throw new PostQAuthError(message, code);
+        case 404:
+          throw new PostQNotFoundError(message, code);
+        case 429:
+          throw new PostQRateLimitError(message, code);
+        default:
+          if (response.status >= 500) {
+            throw new PostQServerError(message, response.status, code);
+          }
+          throw new PostQError(message, { status: response.status, code });
+      }
     }
 
-    return json as T;
+    return (json ?? {}) as T;
+  }
+}
+
+/**
+ * Scans resource — submit new scans and list recent ones.
+ */
+export class ScansResource {
+  constructor(private readonly client: PostQ) {}
+
+  /** `POST /v1/scans` — submit a scan from your own scanner/agent. */
+  async submit(input: ScanSubmitInput): Promise<ScanSubmitResult> {
+    const body = {
+      type: input.type,
+      target: input.target,
+      source: input.source ?? "sdk",
+      riskScore: input.riskScore,
+      riskLevel: input.riskLevel,
+      findings: input.findings ?? [],
+      metadata: input.metadata ?? {},
+      agent: input.agent ?? {},
+    };
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: ScanSubmitResult;
+    }>("POST", "/v1/scans", { body });
+    return envelope.data;
+  }
+
+  /** `GET /v1/scans` — one page of recent scans for your org. */
+  async list(opts: { limit?: number; cursor?: string } = {}): Promise<ScanListResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: ScanListItem[];
+      pagination: { limit: number; nextCursor: string | null };
+    }>("GET", "/v1/scans", {
+      query: { limit: opts.limit ?? 20, cursor: opts.cursor },
+    });
+    return { data: envelope.data, pagination: envelope.pagination };
+  }
+
+  /** Async iterator over every scan, walking the cursor automatically. */
+  async *iterAll(opts: { pageSize?: number } = {}): AsyncIterableIterator<ScanListItem> {
+    let cursor: string | undefined;
+    const limit = opts.pageSize ?? 100;
+    while (true) {
+      const page = await this.list({ limit, cursor });
+      for (const row of page.data) yield row;
+      if (!page.pagination.nextCursor) return;
+      cursor = page.pagination.nextCursor;
+    }
   }
 }

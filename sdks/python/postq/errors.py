@@ -1,17 +1,43 @@
-"""Exceptions raised by the PostQ SDK."""
+"""Exception hierarchy for the PostQ SDK. Catch :class:`PostQError` to catch them all."""
+from __future__ import annotations
+
+from typing import Optional
 
 
 class PostQError(Exception):
-    """Raised when the PostQ API returns a non-2xx response."""
+    """Base class for every error raised by this SDK."""
 
-    def __init__(self, message: str, status_code: int, code: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: Optional[int] = None,
+        code: Optional[str] = None,
+    ) -> None:
         super().__init__(message)
-        self.status_code = status_code
+        self.status = status
         self.code = code
 
-    def __repr__(self) -> str:
-        return f"PostQError(status_code={self.status_code}, code={self.code!r}, message={str(self)!r})"
+
+class PostQConfigError(PostQError):
+    """Bad or missing configuration (e.g. no API key)."""
 
 
-class PostQConfigError(Exception):
-    """Raised when the SDK is misconfigured (e.g. missing API key)."""
+class PostQAuthError(PostQError):
+    """401 — bad, missing, revoked, or expired API key."""
+
+
+class PostQNotFoundError(PostQError):
+    """404 — resource not found."""
+
+
+class PostQRateLimitError(PostQError):
+    """429 — rate limit exceeded."""
+
+
+class PostQServerError(PostQError):
+    """5xx — server error."""
+
+
+class PostQNetworkError(PostQError):
+    """Connection refused, DNS failure, timeout."""

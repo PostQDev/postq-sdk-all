@@ -1,192 +1,252 @@
-"""PostQ HTTP client."""
-
+"""HTTP transport for the PostQ API."""
 from __future__ import annotations
 
-import base64
-import json
-from typing import Any, Dict, List, Literal, Optional
+import os
+import platform
+from typing import Any, Iterator, Mapping, Optional, Sequence, Union
+from urllib.parse import urljoin
 
-import urllib3
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-from .errors import PostQConfigError, PostQError
-from .models import ListKeysResponse, ScanResponse, SignResponse, VerifyResponse
+from . import __version__
+from .errors import (
+    PostQAuthError,
+    PostQConfigError,
+    PostQError,
+    PostQNetworkError,
+    PostQNotFoundError,
+    PostQRateLimitError,
+    PostQServerError,
+)
+from .models import Finding, ScanListItem, ScanSubmitResult
 
-_DEFAULT_BASE_URL = "https://api.postq.dev/v1"
-_DEFAULT_ENVIRONMENT = "production"
+DEFAULT_BASE_URL = "https://api.postq.dev"
 
 
 class PostQ:
-    """
-    PostQ SDK client.
+    """Synchronous client for the PostQ API.
+
+    Reads the API key from the ``api_key`` argument or the ``POSTQ_API_KEY``
+    environment variable. Raises :class:`PostQConfigError` if neither is set.
 
     Example::
 
         from postq import PostQ
 
-        pq = PostQ(api_key="pq_live_sk_...")
-
-        sig = pq.sign(
-            payload=b"Hello Quantum World",
-            algorithm="dilithium3+ed25519",
-            key_id="vault://signing/production",
+        pq = PostQ(api_key="pq_live_…")
+        result = pq.scans.submit(
+            type="url",
+            target="example.com",
+            risk_score=85,
+            risk_level="High",
         )
-
-        is_valid = pq.verify(
-            payload=b"Hello Quantum World",
-            signature=sig.signature,
-            key_id="vault://signing/production",
-        )
+        print(result.url)
     """
 
     def __init__(
         self,
-        api_key: str,
-        environment: Literal["production", "staging", "development"] = _DEFAULT_ENVIRONMENT,
-        base_url: str = _DEFAULT_BASE_URL,
+        api_key: Optional[str] = None,
+        *,
+        base_url: Optional[str] = None,
+        timeout: float = 30.0,
+        max_retries: int = 3,
     ) -> None:
-        if not api_key or not api_key.strip():
+        key = api_key or os.environ.get("POSTQ_API_KEY")
+        if not key:
             raise PostQConfigError(
-                "api_key is required. Provide it when constructing PostQ()."
+                "api_key not provided and POSTQ_API_KEY env var is not set"
             )
-        self._api_key = api_key
-        self._environment = environment
-        self._base_url = base_url.rstrip("/")
-        self._http = urllib3.PoolManager()
+        self._api_key = key.strip()
+        self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        self._timeout = timeout
 
-    # ---------------------------------------------------------------------------
-    # Public API
-    # ---------------------------------------------------------------------------
+        self._session = requests.Session()
+        retry = Retry(
+            total=max_retries,
+            backoff_factor=0.5,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"],
+            respect_retry_after_header=True,
+            # Surface the final response so we can map it to the right exception
+            # type instead of urllib3 raising MaxRetryError.
+            raise_on_status=False,
+        )
+        self._session.mount("https://", HTTPAdapter(max_retries=retry))
+        self._session.mount("http://", HTTPAdapter(max_retries=retry))
+        self._session.headers.update(
+            {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": (
+                    f"postq-sdk-python/{__version__} "
+                    f"python/{platform.python_version()}"
+                ),
+            }
+        )
 
-    def sign(
-        self,
-        payload: bytes,
-        algorithm: str,
-        key_id: str,
-        context: Optional[Dict[str, str]] = None,
-    ) -> SignResponse:
-        """
-        Create a hybrid signature.
+        # Resource namespaces.
+        self.scans = ScansResource(self)
 
-        :param payload: Raw bytes to sign.
-        :param algorithm: Hybrid algorithm (e.g. ``"dilithium3+ed25519"``).
-        :param key_id: Key identifier (e.g. ``"vault://signing/production"``).
-        :param context: Optional metadata dict attached to the signing context.
-        :returns: :class:`~postq.models.SignResponse`
-        :raises PostQError: If the API returns a non-2xx response.
-        """
-        body: Dict[str, Any] = {
-            "payload": self._to_base64(payload),
-            "algorithm": algorithm,
-            "key_id": key_id,
-        }
-        if context is not None:
-            body["context"] = context
-        data = self._request("POST", "/sign", body)
-        return SignResponse.from_dict(data)
+    # ── public ──────────────────────────────────────────────────────────────
 
-    def verify(
-        self,
-        payload: bytes,
-        signature: str,
-        key_id: str,
-    ) -> VerifyResponse:
-        """
-        Verify a hybrid signature.
+    def health(self) -> "dict[str, Any]":
+        """Hit ``GET /health``. Returns the parsed JSON or raises."""
+        return self._request("GET", "/health")
 
-        :param payload: Raw bytes that were signed.
-        :param signature: Combined (hybrid) signature to verify, base64-encoded.
-        :param key_id: Key identifier used when signing.
-        :returns: :class:`~postq.models.VerifyResponse`
-        :raises PostQError: If the API returns a non-2xx response.
-        """
-        data = self._request("POST", "/verify", {
-            "payload": self._to_base64(payload),
-            "signature": signature,
-            "key_id": key_id,
-        })
-        return VerifyResponse.from_dict(data)
+    def close(self) -> None:
+        self._session.close()
 
-    def list_keys(self) -> ListKeysResponse:
-        """
-        List all cryptographic keys managed by PostQ.
+    def __enter__(self) -> "PostQ":
+        return self
 
-        :returns: :class:`~postq.models.ListKeysResponse`
-        :raises PostQError: If the API returns a non-2xx response.
-        """
-        data = self._request("GET", "/keys")
-        return ListKeysResponse.from_dict(data)
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
-    def scan(
-        self,
-        targets: List[str],
-        depth: Literal["quick", "full"] = "full",
-        include: Optional[List[Literal["tls", "signing", "encryption"]]] = None,
-    ) -> ScanResponse:
-        """
-        Trigger a quantum risk scan across specified targets.
-
-        :param targets: Targets to scan (e.g. ``["kubernetes://production"]``).
-        :param depth: Scan depth (``"quick"`` or ``"full"``). Defaults to ``"full"``.
-        :param include: Cryptographic categories to scan. Defaults to all categories.
-        :returns: :class:`~postq.models.ScanResponse`
-        :raises PostQError: If the API returns a non-2xx response.
-        """
-        data = self._request("POST", "/scan", {
-            "targets": targets,
-            "depth": depth,
-            "include": include if include is not None else ["tls", "signing", "encryption"],
-        })
-        return ScanResponse.from_dict(data)
-
-    # ---------------------------------------------------------------------------
-    # Private helpers
-    # ---------------------------------------------------------------------------
-
-    @staticmethod
-    def _to_base64(data: bytes) -> str:
-        return base64.b64encode(data).decode("ascii")
-
-    def _build_headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-            "X-PostQ-Environment": self._environment,
-        }
+    # ── internal ────────────────────────────────────────────────────────────
 
     def _request(
         self,
         method: str,
         path: str,
-        body: Optional[Dict[str, Any]] = None,
+        *,
+        json: Optional[Mapping[str, Any]] = None,
+        params: Optional[Mapping[str, Any]] = None,
     ) -> Any:
-        url = f"{self._base_url}{path}"
-        encoded_body = json.dumps(body).encode("utf-8") if body is not None else None
-
+        url = urljoin(self._base_url + "/", path.lstrip("/"))
         try:
-            response = self._http.request(
+            resp = self._session.request(
                 method,
                 url,
-                body=encoded_body,
-                headers=self._build_headers(),
+                json=json,
+                params=params,
+                timeout=self._timeout,
             )
-        except urllib3.exceptions.HTTPError as exc:
-            raise PostQError(
-                f"Network error while calling {method} {path}: {exc}", 0
-            ) from exc
+        except requests.RequestException as exc:
+            raise PostQNetworkError(f"{method} {path}: {exc}") from exc
 
-        try:
-            data = json.loads(response.data.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise PostQError(
-                f"Unexpected non-JSON response from {method} {path}",
-                response.status,
-            ) from exc
+        message, code = _extract_error(resp)
+        status = resp.status_code
 
-        if not (200 <= response.status < 300):
-            raise PostQError(
-                data.get("message", f"Request failed with status {response.status}"),
-                response.status,
-                data.get("code"),
+        if status == 401:
+            raise PostQAuthError(message, status=status, code=code)
+        if status == 404:
+            raise PostQNotFoundError(message, status=status, code=code)
+        if status == 429:
+            raise PostQRateLimitError(message, status=status, code=code)
+        if 500 <= status < 600:
+            raise PostQServerError(message, status=status, code=code)
+        if status >= 400:
+            raise PostQError(message, status=status, code=code)
+
+        if not resp.content:
+            return None
+        return resp.json()
+
+
+class ScansResource:
+    """Operations under ``/v1/scans``."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def submit(
+        self,
+        *,
+        type: str,
+        target: str,
+        risk_score: int,
+        risk_level: str,
+        findings: Sequence[Union[Finding, Mapping[str, Any]]] = (),
+        source: str = "sdk",
+        metadata: Optional[Mapping[str, str]] = None,
+        agent: Optional[Mapping[str, str]] = None,
+    ) -> ScanSubmitResult:
+        """``POST /v1/scans`` — submit a scan from your scanner/agent."""
+        payload = {
+            "type": type,
+            "target": target,
+            "source": source,
+            "riskScore": risk_score,
+            "riskLevel": risk_level,
+            "findings": [_normalize_finding(f) for f in findings],
+            "metadata": dict(metadata or {}),
+            "agent": dict(agent or {}),
+        }
+        body = self._client._request("POST", "/v1/scans", json=payload)
+        data = body["data"]
+        return ScanSubmitResult(
+            id=data["id"],
+            created_at=data["createdAt"],
+            url=data["url"],
+        )
+
+    def list(
+        self,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> "list[ScanListItem]":
+        """``GET /v1/scans`` — one page of recent scans."""
+        params: "dict[str, Any]" = {"limit": limit}
+        if cursor:
+            params["cursor"] = cursor
+        body = self._client._request("GET", "/v1/scans", params=params)
+        return [_row_to_item(row) for row in body["data"]]
+
+    def iter_all(self, *, page_size: int = 100) -> Iterator[ScanListItem]:
+        """Generator that walks every scan via cursor pagination."""
+        cursor: Optional[str] = None
+        while True:
+            params: "dict[str, Any]" = {"limit": page_size}
+            if cursor:
+                params["cursor"] = cursor
+            body = self._client._request("GET", "/v1/scans", params=params)
+            for row in body["data"]:
+                yield _row_to_item(row)
+            cursor = (body.get("pagination") or {}).get("nextCursor")
+            if not cursor:
+                return
+
+
+def _normalize_finding(f: Union[Finding, Mapping[str, Any]]) -> "dict[str, Any]":
+    if isinstance(f, Finding):
+        return {
+            "severity": f.severity,
+            "title": f.title,
+            "description": f.description,
+            "location": f.location,
+            "algorithm": f.algorithm,
+            "remediation": f.remediation,
+            "vulnerable": f.vulnerable,
+        }
+    return dict(f)
+
+
+def _row_to_item(row: Mapping[str, Any]) -> ScanListItem:
+    return ScanListItem(
+        id=row["id"],
+        type=row["type"],
+        target=row["target"],
+        source=row["source"],
+        risk_score=row["riskScore"],
+        risk_level=row["riskLevel"],
+        findings_count=row["findingsCount"],
+        created_at=row["createdAt"],
+        url=row["url"],
+    )
+
+
+def _extract_error(resp: requests.Response) -> "tuple[str, Optional[str]]":
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            return (
+                body.get("error") or body.get("message") or f"HTTP {resp.status_code}",
+                body.get("code"),
             )
-
-        return data
+    except (ValueError, requests.exceptions.JSONDecodeError):
+        pass
+    return resp.text or f"HTTP {resp.status_code}", None

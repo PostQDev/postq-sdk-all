@@ -1,49 +1,53 @@
-"""
-PostQ SDK for Python
-~~~~~~~~~~~~~~~~~~~~
+"""Official PostQ SDK for Python.
 
-Official Python SDK for PostQ – quantum-safe cryptography for your applications.
+Submit quantum-risk scans and read results from the PostQ API
+(https://api.postq.dev).
 
-Basic usage::
+Example::
 
     from postq import PostQ
 
-    pq = PostQ(api_key="pq_live_sk_...")
+    pq = PostQ(api_key="pq_live_...")
 
-    signature = pq.sign(
-        payload=b"Hello Quantum World",
-        algorithm="dilithium3+ed25519",
-        key_id="vault://signing/production",
+    result = pq.scans.submit(
+        type="url",
+        target="example.com",
+        risk_score=85,
+        risk_level="High",
     )
+    print(result.url)
 
-    is_valid = pq.verify(
-        payload=b"Hello Quantum World",
-        signature=signature["signature"],
-        key_id="vault://signing/production",
-    )
+    for scan in pq.scans.list(limit=10):
+        print(scan.target, scan.risk_level)
 """
+from __future__ import annotations
 
-from .client import PostQ
-from .errors import PostQError, PostQConfigError
-from .models import (
-    Algorithm,
-    SignResponse,
-    VerifyResponse,
-    Key,
-    ListKeysResponse,
-    ScanSummary,
-    ScanResponse,
+__version__ = "0.2.0"
+
+from .client import PostQ, ScansResource
+from .errors import (
+    PostQAuthError,
+    PostQConfigError,
+    PostQError,
+    PostQNetworkError,
+    PostQNotFoundError,
+    PostQRateLimitError,
+    PostQServerError,
 )
+from .models import Finding, ScanListItem, ScanSubmitResult
 
 __all__ = [
+    "__version__",
     "PostQ",
+    "ScansResource",
     "PostQError",
     "PostQConfigError",
-    "Algorithm",
-    "SignResponse",
-    "VerifyResponse",
-    "Key",
-    "ListKeysResponse",
-    "ScanSummary",
-    "ScanResponse",
+    "PostQAuthError",
+    "PostQNotFoundError",
+    "PostQRateLimitError",
+    "PostQServerError",
+    "PostQNetworkError",
+    "Finding",
+    "ScanListItem",
+    "ScanSubmitResult",
 ]

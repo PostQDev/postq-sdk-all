@@ -1,272 +1,207 @@
-"""Tests for the PostQ Python SDK."""
-
+"""Tests for the PostQ SDK against a mocked API."""
 from __future__ import annotations
 
-import json
-import base64
-from unittest.mock import MagicMock, patch
+import os
 
 import pytest
+import responses
 
-from postq import PostQ, PostQError, PostQConfigError
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-SIGN_RESPONSE = {
-    "signature": "base64-combined-signature",
-    "classical_sig": "base64-ed25519-signature",
-    "pq_sig": "base64-dilithium3-signature",
-    "algorithm": "dilithium3+ed25519",
-    "key_id": "vault://signing/production",
-    "timestamp": "2026-04-05T12:00:00Z",
-    "policy_compliant": True,
-}
-
-VERIFY_RESPONSE = {
-    "valid": True,
-    "classical_valid": True,
-    "pq_valid": True,
-    "algorithm": "dilithium3+ed25519",
-    "key_id": "vault://signing/production",
-}
-
-LIST_KEYS_RESPONSE = {
-    "keys": [
-        {
-            "id": "vault://signing/production",
-            "algorithm": "dilithium3+ed25519",
-            "created_at": "2026-01-15T08:00:00Z",
-            "status": "active",
-            "backend": "azure-key-vault",
-            "pq_ready": True,
-        },
-        {
-            "id": "vault://signing/staging",
-            "algorithm": "ed25519",
-            "created_at": "2025-06-01T10:00:00Z",
-            "status": "active",
-            "backend": "hashicorp-vault",
-            "pq_ready": False,
-        },
-    ]
-}
-
-SCAN_RESPONSE = {
-    "scan_id": "scan_abc123",
-    "status": "completed",
-    "summary": {
-        "total_endpoints": 4184,
-        "quantum_vulnerable": 3012,
-        "risk_score": 72,
-        "recommendation": "Begin hybrid migration for signing keys",
-    },
-}
+from postq import (
+    Finding,
+    PostQ,
+    PostQAuthError,
+    PostQConfigError,
+    PostQError,
+    PostQNotFoundError,
+    PostQRateLimitError,
+    PostQServerError,
+)
 
 
-def _make_mock_response(body: dict, status: int = 200) -> MagicMock:
-    mock = MagicMock()
-    mock.status = status
-    mock.data = json.dumps(body).encode("utf-8")
-    return mock
+# ── constructor ─────────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def pq(monkeypatch) -> PostQ:
-    client = PostQ(api_key="pq_live_sk_test", base_url="https://api.example.com/v1")
-    return client
-
-
-# ---------------------------------------------------------------------------
-# Constructor
-# ---------------------------------------------------------------------------
-
-
-def test_constructor_raises_on_empty_api_key():
+def test_constructor_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("POSTQ_API_KEY", raising=False)
     with pytest.raises(PostQConfigError):
-        PostQ(api_key="")
+        PostQ()
 
 
-def test_constructor_raises_on_whitespace_api_key():
-    with pytest.raises(PostQConfigError):
-        PostQ(api_key="   ")
+def test_constructor_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTQ_API_KEY", "pq_live_envtest")
+    pq = PostQ()
+    assert pq._api_key == "pq_live_envtest"
 
 
-def test_constructor_accepts_valid_api_key():
-    client = PostQ(api_key="pq_live_sk_test")
-    assert client is not None
+def test_constructor_explicit_key_wins(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTQ_API_KEY", "pq_live_env")
+    pq = PostQ(api_key="pq_live_explicit")
+    assert pq._api_key == "pq_live_explicit"
 
 
-# ---------------------------------------------------------------------------
-# sign()
-# ---------------------------------------------------------------------------
+# ── submit ──────────────────────────────────────────────────────────────────
 
 
-def test_sign_sends_post_request_and_returns_sign_response(pq: PostQ):
-    mock_resp = _make_mock_response(SIGN_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        result = pq.sign(
-            payload=b"Hello Quantum World",
-            algorithm="dilithium3+ed25519",
-            key_id="vault://signing/production",
-        )
-
-    mock_req.assert_called_once()
-    args, kwargs = mock_req.call_args
-    assert args[0] == "POST"
-    assert args[1].endswith("/sign")
-    sent_body = json.loads(kwargs["body"])
-    assert sent_body["algorithm"] == "dilithium3+ed25519"
-    assert sent_body["key_id"] == "vault://signing/production"
-    # payload must be base64
-    assert base64.b64decode(sent_body["payload"]) == b"Hello Quantum World"
-
-    assert result.algorithm == "dilithium3+ed25519"
-    assert result.policy_compliant is True
-
-
-def test_sign_includes_context_when_provided(pq: PostQ):
-    mock_resp = _make_mock_response(SIGN_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        pq.sign(
-            payload=b"data",
-            algorithm="dilithium3+ed25519",
-            key_id="vault://signing/production",
-            context={"service": "payment-api", "environment": "production"},
-        )
-
-    _, kwargs = mock_req.call_args
-    body = json.loads(kwargs["body"])
-    assert body["context"] == {"service": "payment-api", "environment": "production"}
-
-
-def test_sign_raises_postq_error_on_401(pq: PostQ):
-    mock_resp = _make_mock_response({"code": "UNAUTHORIZED", "message": "Invalid API key"}, status=401)
-    with patch.object(pq._http, "request", return_value=mock_resp):
-        with pytest.raises(PostQError) as exc_info:
-            pq.sign(
-                payload=b"data",
-                algorithm="dilithium3+ed25519",
-                key_id="vault://signing/production",
-            )
-    assert exc_info.value.status_code == 401
-    assert exc_info.value.code == "UNAUTHORIZED"
-
-
-def test_sign_sets_authorization_header(pq: PostQ):
-    mock_resp = _make_mock_response(SIGN_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        pq.sign(payload=b"data", algorithm="dilithium3+ed25519", key_id="k1")
-
-    _, kwargs = mock_req.call_args
-    assert kwargs["headers"]["Authorization"] == "Bearer pq_live_sk_test"
-
-
-# ---------------------------------------------------------------------------
-# verify()
-# ---------------------------------------------------------------------------
-
-
-def test_verify_sends_post_request_and_returns_verify_response(pq: PostQ):
-    mock_resp = _make_mock_response(VERIFY_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        result = pq.verify(
-            payload=b"Hello Quantum World",
-            signature="base64-combined-signature",
-            key_id="vault://signing/production",
-        )
-
-    args, kwargs = mock_req.call_args
-    assert args[0] == "POST"
-    assert args[1].endswith("/verify")
-    body = json.loads(kwargs["body"])
-    assert body["signature"] == "base64-combined-signature"
-    assert body["key_id"] == "vault://signing/production"
-
-    assert result.valid is True
-    assert result.classical_valid is True
-    assert result.pq_valid is True
-
-
-def test_verify_raises_postq_error_on_invalid_signature(pq: PostQ):
-    mock_resp = _make_mock_response(
-        {"code": "INVALID_SIGNATURE", "message": "Signature mismatch"}, status=422
+@responses.activate
+def test_submit_scan_returns_url() -> None:
+    responses.add(
+        responses.POST,
+        "https://api.postq.dev/v1/scans",
+        json={
+            "success": True,
+            "data": {
+                "id": "abc-123",
+                "createdAt": "2026-04-23T12:00:00Z",
+                "url": "https://app.postq.dev/scans/abc-123",
+            },
+        },
+        status=201,
     )
-    with patch.object(pq._http, "request", return_value=mock_resp):
-        with pytest.raises(PostQError) as exc_info:
-            pq.verify(payload=b"data", signature="bad-sig", key_id="k1")
-    assert exc_info.value.status_code == 422
+
+    pq = PostQ(api_key="pq_live_test")
+    result = pq.scans.submit(
+        type="url",
+        target="example.com",
+        risk_score=85,
+        risk_level="High",
+        findings=[Finding(severity="high", title="RSA-2048 public key")],
+    )
+
+    assert result.id == "abc-123"
+    assert result.url.endswith("/scans/abc-123")
+
+    # Validate the request
+    sent = responses.calls[0].request
+    assert sent.headers["Authorization"] == "Bearer pq_live_test"
+    body = sent.body
+    assert b'"type": "url"' in body
+    assert b'"source": "sdk"' in body
 
 
-# ---------------------------------------------------------------------------
-# list_keys()
-# ---------------------------------------------------------------------------
+@responses.activate
+def test_submit_accepts_dict_findings() -> None:
+    responses.add(
+        responses.POST,
+        "https://api.postq.dev/v1/scans",
+        json={"success": True, "data": {"id": "x", "createdAt": "x", "url": "x"}},
+        status=201,
+    )
+    pq = PostQ(api_key="pq_live_test")
+    result = pq.scans.submit(
+        type="url",
+        target="a.com",
+        risk_score=0,
+        risk_level="Safe",
+        findings=[{"severity": "info", "title": "All good"}],
+    )
+    assert result.id == "x"
 
 
-def test_list_keys_sends_get_request_and_returns_list(pq: PostQ):
-    mock_resp = _make_mock_response(LIST_KEYS_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        result = pq.list_keys()
-
-    args, _ = mock_req.call_args
-    assert args[0] == "GET"
-    assert args[1].endswith("/keys")
-
-    assert len(result.keys) == 2
-    assert result.keys[0].pq_ready is True
-    assert result.keys[1].pq_ready is False
-    assert result.keys[0].id == "vault://signing/production"
+# ── list ────────────────────────────────────────────────────────────────────
 
 
-# ---------------------------------------------------------------------------
-# scan()
-# ---------------------------------------------------------------------------
+@responses.activate
+def test_list_scans() -> None:
+    responses.add(
+        responses.GET,
+        "https://api.postq.dev/v1/scans",
+        json={
+            "success": True,
+            "data": [
+                {
+                    "id": "s1",
+                    "type": "url",
+                    "target": "a.com",
+                    "source": "cli",
+                    "riskScore": 50,
+                    "riskLevel": "Medium",
+                    "findingsCount": 2,
+                    "createdAt": "2026-04-22T00:00:00Z",
+                    "url": "https://app.postq.dev/scans/s1",
+                },
+            ],
+            "pagination": {"limit": 20, "nextCursor": None},
+        },
+        status=200,
+    )
+
+    pq = PostQ(api_key="pq_live_test")
+    items = pq.scans.list(limit=20)
+    assert len(items) == 1
+    assert items[0].id == "s1"
+    assert items[0].risk_level == "Medium"
 
 
-def test_scan_sends_post_request_and_returns_scan_response(pq: PostQ):
-    mock_resp = _make_mock_response(SCAN_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        result = pq.scan(
-            targets=["kubernetes://production", "azure://subscription-id"],
-            depth="full",
-            include=["tls", "signing", "encryption"],
-        )
+@responses.activate
+def test_iter_all_walks_cursor() -> None:
+    page1 = {
+        "success": True,
+        "data": [
+            {
+                "id": "s1", "type": "url", "target": "a.com", "source": "cli",
+                "riskScore": 10, "riskLevel": "Low", "findingsCount": 1,
+                "createdAt": "2026-04-22T01:00:00Z",
+                "url": "https://app.postq.dev/scans/s1",
+            },
+        ],
+        "pagination": {"limit": 1, "nextCursor": "2026-04-22T01:00:00Z"},
+    }
+    page2 = {
+        "success": True,
+        "data": [
+            {
+                "id": "s2", "type": "url", "target": "b.com", "source": "cli",
+                "riskScore": 0, "riskLevel": "Safe", "findingsCount": 0,
+                "createdAt": "2026-04-22T00:00:00Z",
+                "url": "https://app.postq.dev/scans/s2",
+            },
+        ],
+        "pagination": {"limit": 1, "nextCursor": None},
+    }
+    responses.add(responses.GET, "https://api.postq.dev/v1/scans", json=page1, status=200)
+    responses.add(responses.GET, "https://api.postq.dev/v1/scans", json=page2, status=200)
 
-    args, kwargs = mock_req.call_args
-    assert args[0] == "POST"
-    assert args[1].endswith("/scan")
-    body = json.loads(kwargs["body"])
-    assert body["targets"] == ["kubernetes://production", "azure://subscription-id"]
-    assert body["depth"] == "full"
-
-    assert result.scan_id == "scan_abc123"
-    assert result.status == "completed"
-    assert result.summary is not None
-    assert result.summary.risk_score == 72
-
-
-def test_scan_defaults_depth_and_include(pq: PostQ):
-    mock_resp = _make_mock_response(SCAN_RESPONSE)
-    with patch.object(pq._http, "request", return_value=mock_resp) as mock_req:
-        pq.scan(targets=["kubernetes://production"])
-
-    _, kwargs = mock_req.call_args
-    body = json.loads(kwargs["body"])
-    assert body["depth"] == "full"
-    assert body["include"] == ["tls", "signing", "encryption"]
-
-
-# ---------------------------------------------------------------------------
-# Network errors
-# ---------------------------------------------------------------------------
+    pq = PostQ(api_key="pq_live_test")
+    ids = [s.id for s in pq.scans.iter_all(page_size=1)]
+    assert ids == ["s1", "s2"]
 
 
-def test_network_error_raises_postq_error(pq: PostQ):
-    import urllib3.exceptions
+# ── error mapping ───────────────────────────────────────────────────────────
 
-    with patch.object(pq._http, "request", side_effect=urllib3.exceptions.HTTPError("ECONNREFUSED")):
-        with pytest.raises(PostQError) as exc_info:
-            pq.list_keys()
-    assert exc_info.value.status_code == 0
+
+@pytest.mark.parametrize(
+    "status,exc_type",
+    [
+        (401, PostQAuthError),
+        (404, PostQNotFoundError),
+        (429, PostQRateLimitError),
+        (500, PostQServerError),
+        (503, PostQServerError),
+        (400, PostQError),
+    ],
+)
+@responses.activate
+def test_error_status_mapping(status: int, exc_type: type) -> None:
+    responses.add(
+        responses.GET,
+        "https://api.postq.dev/v1/scans",
+        json={"success": False, "error": f"failed {status}"},
+        status=status,
+    )
+    pq = PostQ(api_key="pq_live_test", max_retries=0)
+    with pytest.raises(exc_type):
+        pq.scans.list()
+
+
+# ── health ──────────────────────────────────────────────────────────────────
+
+
+@responses.activate
+def test_health_returns_status() -> None:
+    responses.add(
+        responses.GET,
+        "https://api.postq.dev/health",
+        json={"status": "ok"},
+        status=200,
+    )
+    assert PostQ(api_key="pq_live_test").health()["status"] == "ok"

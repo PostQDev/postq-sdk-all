@@ -1,322 +1,154 @@
 using System.Net;
-using System.Text;
 using System.Text.Json;
+using PostQ;
 using RichardSzalay.MockHttp;
 
-namespace PostQ.Tests;
+namespace PostQ.Sdk.Tests;
 
-public sealed class PostQClientTests
+public class PostQClientTests
 {
-    // -------------------------------------------------------------------------
-    // Fixture data
-    // -------------------------------------------------------------------------
+    private const string Base = "https://api.example.com";
 
-    private static readonly string SignResponseJson = JsonSerializer.Serialize(new
+    private static (PostQClient client, MockHttpMessageHandler mock) Build(string apiKey = "pq_live_test")
     {
-        signature = "base64-combined-signature",
-        classical_sig = "base64-ed25519-signature",
-        pq_sig = "base64-dilithium3-signature",
-        algorithm = "dilithium3+ed25519",
-        key_id = "vault://signing/production",
-        timestamp = "2026-04-05T12:00:00Z",
-        policy_compliant = true,
-    });
-
-    private static readonly string VerifyResponseJson = JsonSerializer.Serialize(new
-    {
-        valid = true,
-        classical_valid = true,
-        pq_valid = true,
-        algorithm = "dilithium3+ed25519",
-        key_id = "vault://signing/production",
-    });
-
-    private static readonly string ListKeysResponseJson = JsonSerializer.Serialize(new
-    {
-        keys = new[]
-        {
-            new
-            {
-                id = "vault://signing/production",
-                algorithm = "dilithium3+ed25519",
-                created_at = "2026-01-15T08:00:00Z",
-                status = "active",
-                backend = "azure-key-vault",
-                pq_ready = true,
-            },
-            new
-            {
-                id = "vault://signing/staging",
-                algorithm = "ed25519",
-                created_at = "2025-06-01T10:00:00Z",
-                status = "active",
-                backend = "hashicorp-vault",
-                pq_ready = false,
-            },
-        },
-    });
-
-    private static readonly string ScanResponseJson = JsonSerializer.Serialize(new
-    {
-        scan_id = "scan_abc123",
-        status = "completed",
-        summary = new
-        {
-            total_endpoints = 4184,
-            quantum_vulnerable = 3012,
-            risk_score = 72,
-            recommendation = "Begin hybrid migration for signing keys",
-        },
-    });
-
-    private const string BaseUrl = "https://api.example.com/v1";
-
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
-
-    private static (PostQClient client, MockHttpMessageHandler mock) BuildClient(
-        string method,
-        string path,
-        string responseBody,
-        HttpStatusCode status = HttpStatusCode.OK)
-    {
-        var mockHttp = new MockHttpMessageHandler();
-        mockHttp
-            .When(HttpMethod.Parse(method), $"{BaseUrl}{path}")
-            .Respond(status, "application/json", responseBody);
-
-        var httpClient = mockHttp.ToHttpClient();
+        var mock = new MockHttpMessageHandler();
+        var http = new HttpClient(mock);
         var client = new PostQClient(
-            new PostQClientOptions { ApiKey = "pq_live_sk_test", BaseUrl = BaseUrl },
-            httpClient);
-        return (client, mockHttp);
+            new PostQClientOptions { ApiKey = apiKey, BaseUrl = Base },
+            http);
+        return (client, mock);
     }
 
-    // -------------------------------------------------------------------------
-    // Constructor
-    // -------------------------------------------------------------------------
+    // ── constructor ─────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_ThrowsPostQConfigException_WhenApiKeyIsEmpty()
+    public void Constructor_Throws_When_ApiKey_Missing()
     {
         Assert.Throws<PostQConfigException>(() =>
             new PostQClient(new PostQClientOptions { ApiKey = "" }));
     }
 
     [Fact]
-    public void Constructor_ThrowsPostQConfigException_WhenApiKeyIsWhitespace()
+    public void Constructor_Throws_When_ApiKey_Whitespace()
     {
         Assert.Throws<PostQConfigException>(() =>
             new PostQClient(new PostQClientOptions { ApiKey = "   " }));
     }
 
-    [Fact]
-    public void Constructor_DoesNotThrow_WhenApiKeyIsValid()
-    {
-        using var _ = new PostQClient(new PostQClientOptions { ApiKey = "pq_live_sk_test" });
-    }
-
-    // -------------------------------------------------------------------------
-    // SignAsync
-    // -------------------------------------------------------------------------
+    // ── submit ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SignAsync_ReturnsSignResponse_OnSuccess()
+    public async Task Submit_Posts_And_Returns_Result()
     {
-        var (client, mock) = BuildClient("POST", "/sign", SignResponseJson);
-        using (client)
+        var (client, mock) = Build();
+        mock.When(HttpMethod.Post, $"{Base}/v1/scans")
+            .Respond(HttpStatusCode.Created, "application/json",
+                """{"success":true,"data":{"id":"abc-123","createdAt":"2026-04-23T12:00:00Z","url":"https://app.postq.dev/scans/abc-123"}}""");
+
+        var result = await client.Scans.SubmitAsync(new ScanSubmitInput
         {
-            var result = await client.SignAsync(new SignRequest
+            Type = "url",
+            Target = "example.com",
+            RiskScore = 85,
+            RiskLevel = "High",
+            Findings = new[]
             {
-                Payload = Encoding.UTF8.GetBytes("Hello Quantum World"),
-                AlgorithmName = Algorithm.Dilithium3Ed25519,
-                KeyId = "vault://signing/production",
-            });
-
-            Assert.Equal("base64-combined-signature", result.Signature);
-            Assert.Equal("dilithium3+ed25519", result.AlgorithmName);
-            Assert.True(result.PolicyCompliant);
-        }
-        mock.VerifyNoOutstandingExpectation();
-    }
-
-    [Fact]
-    public async Task SignAsync_SerializesPayloadAsBase64()
-    {
-        string? capturedBody = null;
-        var mockHttp = new MockHttpMessageHandler();
-        mockHttp
-            .When(HttpMethod.Post, $"{BaseUrl}/sign")
-            .Respond(async req =>
-            {
-                capturedBody = await req.Content!.ReadAsStringAsync();
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(SignResponseJson, Encoding.UTF8, "application/json"),
-                };
-            });
-
-        using var client = new PostQClient(
-            new PostQClientOptions { ApiKey = "pq_live_sk_test", BaseUrl = BaseUrl },
-            mockHttp.ToHttpClient());
-
-        await client.SignAsync(new SignRequest
-        {
-            Payload = Encoding.UTF8.GetBytes("Hello Quantum World"),
-            AlgorithmName = Algorithm.Dilithium3Ed25519,
-            KeyId = "vault://signing/production",
+                new Finding { Severity = "high", Title = "RSA-2048 public key" },
+            },
         });
 
-        Assert.NotNull(capturedBody);
-        using var doc = JsonDocument.Parse(capturedBody!);
-        var payload = doc.RootElement.GetProperty("payload").GetString();
-        Assert.Equal("Hello Quantum World", Encoding.UTF8.GetString(Convert.FromBase64String(payload!)));
+        Assert.Equal("abc-123", result.Id);
+        Assert.EndsWith("/scans/abc-123", result.Url);
     }
 
     [Fact]
-    public async Task SignAsync_ThrowsPostQException_On401()
+    public async Task Submit_Sends_Authorization_Header()
     {
-        var (client, _) = BuildClient("POST", "/sign",
-            """{"code":"UNAUTHORIZED","message":"Invalid API key"}""",
-            HttpStatusCode.Unauthorized);
-        using (client)
+        var (client, mock) = Build("pq_live_xyz");
+        mock.Expect(HttpMethod.Post, $"{Base}/v1/scans")
+            .WithHeaders("Authorization", "Bearer pq_live_xyz")
+            .Respond(HttpStatusCode.Created, "application/json",
+                """{"success":true,"data":{"id":"x","createdAt":"x","url":"x"}}""");
+
+        await client.Scans.SubmitAsync(new ScanSubmitInput
         {
-            var ex = await Assert.ThrowsAsync<PostQException>(() =>
-                client.SignAsync(new SignRequest
-                {
-                    Payload = [0x01],
-                    AlgorithmName = Algorithm.Dilithium3Ed25519,
-                    KeyId = "k1",
-                }));
+            Type = "url", Target = "a.com", RiskScore = 0, RiskLevel = "Safe",
+        });
 
-            Assert.Equal(401, ex.StatusCode);
-            Assert.Equal("UNAUTHORIZED", ex.Code);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // VerifyAsync
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public async Task VerifyAsync_ReturnsVerifyResponse_OnSuccess()
-    {
-        var (client, mock) = BuildClient("POST", "/verify", VerifyResponseJson);
-        using (client)
-        {
-            var result = await client.VerifyAsync(new VerifyRequest
-            {
-                Payload = Encoding.UTF8.GetBytes("Hello Quantum World"),
-                Signature = "base64-combined-signature",
-                KeyId = "vault://signing/production",
-            });
-
-            Assert.True(result.Valid);
-            Assert.True(result.ClassicalValid);
-            Assert.True(result.PqValid);
-            Assert.Equal("dilithium3+ed25519", result.AlgorithmName);
-        }
         mock.VerifyNoOutstandingExpectation();
     }
 
-    [Fact]
-    public async Task VerifyAsync_ThrowsPostQException_On422()
-    {
-        var (client, _) = BuildClient("POST", "/verify",
-            """{"code":"INVALID_SIGNATURE","message":"Signature mismatch"}""",
-            HttpStatusCode.UnprocessableEntity);
-        using (client)
-        {
-            var ex = await Assert.ThrowsAsync<PostQException>(() =>
-                client.VerifyAsync(new VerifyRequest
-                {
-                    Payload = [0x01],
-                    Signature = "bad-sig",
-                    KeyId = "k1",
-                }));
-
-            Assert.Equal(422, ex.StatusCode);
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // ListKeysAsync
-    // -------------------------------------------------------------------------
+    // ── list ────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ListKeysAsync_ReturnsKeys_OnSuccess()
+    public async Task List_Returns_Items_And_Pagination()
     {
-        var (client, mock) = BuildClient("GET", "/keys", ListKeysResponseJson);
-        using (client)
-        {
-            var result = await client.ListKeysAsync();
+        var (client, mock) = Build();
+        mock.When(HttpMethod.Get, $"{Base}/v1/scans*")
+            .Respond("application/json",
+                """{"success":true,"data":[{"id":"s1","type":"url","target":"a.com","source":"cli","riskScore":50,"riskLevel":"Medium","findingsCount":2,"createdAt":"2026-04-22T00:00:00Z","url":"https://app.postq.dev/scans/s1"}],"pagination":{"limit":20,"nextCursor":null}}""");
 
-            Assert.Equal(2, result.Keys.Count);
-            Assert.True(result.Keys[0].PqReady);
-            Assert.False(result.Keys[1].PqReady);
-            Assert.Equal("vault://signing/production", result.Keys[0].Id);
-        }
-        mock.VerifyNoOutstandingExpectation();
-    }
+        var page = await client.Scans.ListAsync(limit: 20);
 
-    // -------------------------------------------------------------------------
-    // ScanAsync
-    // -------------------------------------------------------------------------
-
-    [Fact]
-    public async Task ScanAsync_ReturnsScanResponse_OnSuccess()
-    {
-        var (client, mock) = BuildClient("POST", "/scan", ScanResponseJson);
-        using (client)
-        {
-            var result = await client.ScanAsync(new ScanRequest
-            {
-                Targets = ["kubernetes://production", "azure://subscription-id"],
-                Depth = "full",
-                Include = ["tls", "signing", "encryption"],
-            });
-
-            Assert.Equal("scan_abc123", result.ScanId);
-            Assert.Equal("completed", result.Status);
-            Assert.NotNull(result.Summary);
-            Assert.Equal(72, result.Summary.RiskScore);
-            Assert.Equal(4184, result.Summary.TotalEndpoints);
-        }
-        mock.VerifyNoOutstandingExpectation();
+        Assert.Single(page.Data);
+        Assert.Equal("s1", page.Data[0].Id);
+        Assert.Equal("Medium", page.Data[0].RiskLevel);
+        Assert.Null(page.Pagination.NextCursor);
     }
 
     [Fact]
-    public async Task ScanAsync_UsesDefaultDepthAndInclude()
+    public async Task IterAll_Walks_Cursor()
     {
-        string? capturedBody = null;
-        var mockHttp = new MockHttpMessageHandler();
-        mockHttp
-            .When(HttpMethod.Post, $"{BaseUrl}/scan")
-            .Respond(async req =>
-            {
-                capturedBody = await req.Content!.ReadAsStringAsync();
-                return new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new StringContent(ScanResponseJson, Encoding.UTF8, "application/json"),
-                };
-            });
+        var (client, mock) = Build();
 
-        using var client = new PostQClient(
-            new PostQClientOptions { ApiKey = "pq_live_sk_test", BaseUrl = BaseUrl },
-            mockHttp.ToHttpClient());
+        mock.When(HttpMethod.Get, $"{Base}/v1/scans?limit=1")
+            .Respond("application/json",
+                """{"success":true,"data":[{"id":"s1","type":"url","target":"a.com","source":"cli","riskScore":10,"riskLevel":"Low","findingsCount":1,"createdAt":"2026-04-22T01:00:00Z","url":"https://app.postq.dev/scans/s1"}],"pagination":{"limit":1,"nextCursor":"2026-04-22T01:00:00Z"}}""");
 
-        await client.ScanAsync(new ScanRequest { Targets = ["kubernetes://production"] });
+        mock.When(HttpMethod.Get, $"{Base}/v1/scans?limit=1&cursor=2026-04-22T01%3A00%3A00Z")
+            .Respond("application/json",
+                """{"success":true,"data":[{"id":"s2","type":"url","target":"b.com","source":"cli","riskScore":0,"riskLevel":"Safe","findingsCount":0,"createdAt":"2026-04-22T00:00:00Z","url":"https://app.postq.dev/scans/s2"}],"pagination":{"limit":1,"nextCursor":null}}""");
 
-        Assert.NotNull(capturedBody);
-        using var doc = JsonDocument.Parse(capturedBody!);
-        Assert.Equal("full", doc.RootElement.GetProperty("depth").GetString());
-        var include = doc.RootElement.GetProperty("include")
-            .EnumerateArray()
-            .Select(e => e.GetString())
-            .ToList();
-        Assert.Contains("tls", include);
-        Assert.Contains("signing", include);
-        Assert.Contains("encryption", include);
+        var ids = new List<string>();
+        await foreach (var item in client.Scans.IterAllAsync(pageSize: 1))
+        {
+            ids.Add(item.Id);
+        }
+
+        Assert.Equal(new[] { "s1", "s2" }, ids);
+    }
+
+    // ── error mapping ───────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized, typeof(PostQAuthException))]
+    [InlineData(HttpStatusCode.NotFound, typeof(PostQNotFoundException))]
+    [InlineData(HttpStatusCode.TooManyRequests, typeof(PostQRateLimitException))]
+    [InlineData(HttpStatusCode.InternalServerError, typeof(PostQServerException))]
+    [InlineData(HttpStatusCode.ServiceUnavailable, typeof(PostQServerException))]
+    [InlineData(HttpStatusCode.BadRequest, typeof(PostQException))]
+    public async Task Status_Maps_To_Exception(HttpStatusCode status, Type exceptionType)
+    {
+        var (client, mock) = Build();
+        mock.When(HttpMethod.Get, $"{Base}/v1/scans*")
+            .Respond(status, "application/json",
+                $$"""{"success":false,"error":"failed {{(int)status}}"}""");
+
+        var ex = await Assert.ThrowsAnyAsync<PostQException>(() => client.Scans.ListAsync());
+        Assert.IsType(exceptionType, ex);
+        Assert.Equal((int)status, ex.Status);
+    }
+
+    // ── health ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Health_Returns_Json()
+    {
+        var (client, mock) = Build();
+        mock.When(HttpMethod.Get, $"{Base}/health")
+            .Respond("application/json", """{"status":"ok"}""");
+
+        var result = await client.HealthAsync();
+        Assert.Equal("ok", result.GetProperty("status").GetString());
     }
 }

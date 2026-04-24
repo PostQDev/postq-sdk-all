@@ -1,4 +1,7 @@
+using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -6,218 +9,251 @@ using System.Text.Json.Serialization;
 namespace PostQ;
 
 /// <summary>
-/// PostQ SDK client for .NET.
+/// PostQ SDK client for .NET. Submit quantum-risk scans and read results.
 /// </summary>
 /// <example>
 /// <code>
 /// using PostQ;
 ///
-/// var pq = new PostQClient(new PostQClientOptions { ApiKey = "pq_live_sk_..." });
+/// using var pq = new PostQClient(new PostQClientOptions { ApiKey = "pq_live_…" });
 ///
-/// var signature = await pq.SignAsync(new SignRequest
+/// var result = await pq.Scans.SubmitAsync(new ScanSubmitInput
 /// {
-///     Payload = Encoding.UTF8.GetBytes("Hello Quantum World"),
-///     AlgorithmName = Algorithm.Dilithium3Ed25519,
-///     KeyId = "vault://signing/production",
+///     Type = "url",
+///     Target = "example.com",
+///     RiskScore = 85,
+///     RiskLevel = "High",
 /// });
-///
-/// var result = await pq.VerifyAsync(new VerifyRequest
-/// {
-///     Payload = Encoding.UTF8.GetBytes("Hello Quantum World"),
-///     Signature = signature.Signature,
-///     KeyId = "vault://signing/production",
-/// });
-/// Console.WriteLine(result.Valid); // true
+/// Console.WriteLine(result.Url);
 /// </code>
 /// </example>
 public sealed class PostQClient : IDisposable
 {
+    private static readonly string SdkVersion =
+        typeof(PostQClient).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    };
+
     private readonly HttpClient _http;
-    private readonly string _environment;
+    private readonly bool _ownsHttp;
     private readonly string _baseUrl;
     private bool _disposed;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        // Response models use explicit [JsonPropertyName] attributes; no policy needed for reading.
-        PropertyNameCaseInsensitive = false,
-    };
+    /// <summary>Operations under <c>/v1/scans</c>.</summary>
+    public ScansResource Scans { get; }
 
-    /// <summary>
-    /// Initialise the PostQ client with the provided options.
-    /// </summary>
-    /// <param name="options">Configuration options.</param>
+    /// <summary>Construct a new client.</summary>
+    /// <param name="options">Required configuration. Must include an API key.</param>
     /// <param name="httpClient">
-    ///   Optional <see cref="HttpClient"/> to use (allows injecting test fakes).
-    ///   When <see langword="null"/> the client creates its own instance.
+    ///   Optional <see cref="HttpClient"/>. When provided, the caller owns its
+    ///   lifecycle and the client will not dispose it.
     /// </param>
-    /// <exception cref="PostQConfigException">
-    ///   Thrown when <see cref="PostQClientOptions.ApiKey"/> is null or blank.
-    /// </exception>
+    /// <exception cref="PostQConfigException">When ApiKey is missing or empty.</exception>
     public PostQClient(PostQClientOptions options, HttpClient? httpClient = null)
     {
+        if (options is null) throw new ArgumentNullException(nameof(options));
         if (string.IsNullOrWhiteSpace(options.ApiKey))
-            throw new PostQConfigException(
-                "ApiKey is required. Provide it via PostQClientOptions.");
+            throw new PostQConfigException("ApiKey is required.");
 
-        _environment = options.Environment;
         _baseUrl = options.BaseUrl.TrimEnd('/');
+        _ownsHttp = httpClient is null;
         _http = httpClient ?? new HttpClient();
+        _http.Timeout = options.Timeout;
         _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", options.ApiKey);
-        _http.DefaultRequestHeaders.Add("X-PostQ-Environment", _environment);
+            new AuthenticationHeaderValue("Bearer", options.ApiKey.Trim());
+        _http.DefaultRequestHeaders.Accept.Add(
+            new MediaTypeWithQualityHeaderValue("application/json"));
+        _http.DefaultRequestHeaders.UserAgent.Add(
+            new ProductInfoHeaderValue("postq-sdk-dotnet", SdkVersion));
+
+        Scans = new ScansResource(this);
     }
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
-
-    /// <summary>Create a hybrid signature combining a classical and a post-quantum algorithm.</summary>
-    /// <param name="request">Signing parameters.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The composite signature plus metadata.</returns>
-    /// <exception cref="PostQException">Thrown when the API returns a non-2xx response.</exception>
-    public async Task<SignResponse> SignAsync(
-        SignRequest request,
-        CancellationToken cancellationToken = default)
+    /// <summary>Hit <c>GET /health</c>. Throws if the API is down.</summary>
+    public async Task<JsonElement> HealthAsync(CancellationToken ct = default)
     {
-        var body = new
-        {
-            payload = Convert.ToBase64String(request.Payload),
-            algorithm = request.AlgorithmName,
-            key_id = request.KeyId,
-            context = request.Context,
-        };
-        return await PostAsync<SignResponse>("/sign", body, cancellationToken).ConfigureAwait(false);
+        return await SendAsync<JsonElement>(HttpMethod.Get, "/health", null, null, ct)
+            .ConfigureAwait(false);
     }
-
-    /// <summary>Verify a hybrid signature.</summary>
-    /// <param name="request">Verification parameters.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Validity information for both signature components.</returns>
-    /// <exception cref="PostQException">Thrown when the API returns a non-2xx response.</exception>
-    public async Task<VerifyResponse> VerifyAsync(
-        VerifyRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var body = new
-        {
-            payload = Convert.ToBase64String(request.Payload),
-            signature = request.Signature,
-            key_id = request.KeyId,
-        };
-        return await PostAsync<VerifyResponse>("/verify", body, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>List all cryptographic keys managed by PostQ.</summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>List of keys with algorithm and PQ-readiness metadata.</returns>
-    /// <exception cref="PostQException">Thrown when the API returns a non-2xx response.</exception>
-    public async Task<ListKeysResponse> ListKeysAsync(
-        CancellationToken cancellationToken = default)
-    {
-        return await GetAsync<ListKeysResponse>("/keys", cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Trigger a quantum risk scan across specified infrastructure targets.</summary>
-    /// <param name="request">Scan parameters.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Scan job identifier and results summary.</returns>
-    /// <exception cref="PostQException">Thrown when the API returns a non-2xx response.</exception>
-    public async Task<ScanResponse> ScanAsync(
-        ScanRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var body = new
-        {
-            targets = request.Targets,
-            depth = request.Depth,
-            include = request.Include,
-        };
-        return await PostAsync<ScanResponse>("/scan", body, cancellationToken).ConfigureAwait(false);
-    }
-
-    // -------------------------------------------------------------------------
-    // IDisposable
-    // -------------------------------------------------------------------------
 
     /// <inheritdoc/>
     public void Dispose()
     {
         if (_disposed) return;
-        _http.Dispose();
+        if (_ownsHttp) _http.Dispose();
         _disposed = true;
     }
 
-    // -------------------------------------------------------------------------
-    // Private helpers
-    // -------------------------------------------------------------------------
+    // ── internal ────────────────────────────────────────────────────────────
 
-    private async Task<T> GetAsync<T>(string path, CancellationToken ct)
-    {
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.GetAsync($"{_baseUrl}{path}", ct).ConfigureAwait(false);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new PostQException($"Network error while calling GET {path}: {ex.Message}", 0);
-        }
-        return await ParseResponseAsync<T>(response, path, ct).ConfigureAwait(false);
-    }
-
-    private async Task<T> PostAsync<T>(string path, object body, CancellationToken ct)
-    {
-        var json = JsonSerializer.Serialize(body, JsonOptions);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await _http.PostAsync($"{_baseUrl}{path}", content, ct).ConfigureAwait(false);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new PostQException($"Network error while calling POST {path}: {ex.Message}", 0);
-        }
-        return await ParseResponseAsync<T>(response, path, ct).ConfigureAwait(false);
-    }
-
-    private static async Task<T> ParseResponseAsync<T>(
-        HttpResponseMessage response,
+    internal async Task<T> SendAsync<T>(
+        HttpMethod method,
         string path,
+        object? body,
+        IDictionary<string, string?>? query,
         CancellationToken ct)
     {
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        var url = _baseUrl + path;
+        if (query is { Count: > 0 })
+        {
+            var qs = string.Join(
+                "&",
+                query.Where(kv => kv.Value is not null)
+                    .Select(kv => $"{Uri.EscapeDataString(kv.Key)}={Uri.EscapeDataString(kv.Value!)}"));
+            if (qs.Length > 0) url += "?" + qs;
+        }
 
-        JsonDocument doc;
+        using var req = new HttpRequestMessage(method, url);
+        if (body is not null)
+        {
+            req.Content = new StringContent(
+                JsonSerializer.Serialize(body, JsonOptions),
+                Encoding.UTF8,
+                "application/json");
+        }
+
+        HttpResponseMessage resp;
         try
         {
-            doc = JsonDocument.Parse(text);
+            resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        }
+        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
+        {
+            throw new PostQNetworkException($"{method} {path} timed out: {ex.Message}");
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new PostQNetworkException($"{method} {path}: {ex.Message}");
+        }
+
+        var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            var (msg, code) = ParseError(text, (int)resp.StatusCode);
+            throw resp.StatusCode switch
+            {
+                HttpStatusCode.Unauthorized => new PostQAuthException(msg, code),
+                HttpStatusCode.NotFound => new PostQNotFoundException(msg, code),
+                HttpStatusCode.TooManyRequests => new PostQRateLimitException(msg, code),
+                _ when (int)resp.StatusCode >= 500 =>
+                    new PostQServerException(msg, (int)resp.StatusCode, code),
+                _ => new PostQException(msg, (int)resp.StatusCode, code),
+            };
+        }
+
+        if (string.IsNullOrEmpty(text))
+        {
+            return default!;
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<T>(text, JsonOptions);
+            return parsed!;
+        }
+        catch (JsonException ex)
+        {
+            throw new PostQException(
+                $"Could not parse response from {method} {path}: {ex.Message}",
+                (int)resp.StatusCode);
+        }
+    }
+
+    private static (string msg, string? code) ParseError(string text, int status)
+    {
+        if (string.IsNullOrEmpty(text)) return ($"HTTP {status}", null);
+        try
+        {
+            var body = JsonSerializer.Deserialize<ErrorBody>(text, JsonOptions);
+            if (body is null) return ($"HTTP {status}", null);
+            return (body.Error ?? body.Message ?? $"HTTP {status}", body.Code);
         }
         catch (JsonException)
         {
-            throw new PostQException(
-                $"Unexpected non-JSON response: {text}",
-                (int)response.StatusCode);
+            return (text.Length > 200 ? text[..200] : text, null);
         }
+    }
+}
 
-        if (!response.IsSuccessStatusCode)
+/// <summary>Operations under <c>/v1/scans</c>.</summary>
+public sealed class ScansResource
+{
+    private readonly PostQClient _client;
+
+    internal ScansResource(PostQClient client) => _client = client;
+
+    /// <summary><c>POST /v1/scans</c> — submit a scan from your scanner/agent.</summary>
+    public async Task<ScanSubmitResult> SubmitAsync(
+        ScanSubmitInput input,
+        CancellationToken ct = default)
+    {
+        var body = new
         {
-            var root = doc.RootElement;
-            string message = root.TryGetProperty("message", out var msgProp)
-                ? msgProp.GetString() ?? $"Request failed with status {(int)response.StatusCode}"
-                : $"Request failed with status {(int)response.StatusCode}";
-            string? code = root.TryGetProperty("code", out var codeProp)
-                ? codeProp.GetString()
-                : null;
-            throw new PostQException(message, (int)response.StatusCode, code);
+            type = input.Type,
+            target = input.Target,
+            source = input.Source,
+            riskScore = input.RiskScore,
+            riskLevel = input.RiskLevel,
+            findings = input.Findings.Select(f => new
+            {
+                severity = f.Severity,
+                title = f.Title,
+                description = f.Description,
+                location = f.Location,
+                algorithm = f.Algorithm,
+                remediation = f.Remediation,
+                vulnerable = f.Vulnerable,
+            }).ToArray(),
+            metadata = input.Metadata ?? new Dictionary<string, string>(),
+            agent = input.Agent ?? new AgentInfo(),
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<ScanSubmitResult>>(HttpMethod.Post, "/v1/scans", body, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException("API returned no data for POST /v1/scans");
         }
+        return envelope.Data;
+    }
 
-        return JsonSerializer.Deserialize<T>(text, JsonOptions)
-            ?? throw new PostQException($"Empty response from {path}", (int)response.StatusCode);
+    /// <summary><c>GET /v1/scans</c> — one page of recent scans for your org.</summary>
+    public async Task<ScanListResult> ListAsync(
+        int limit = 20,
+        string? cursor = null,
+        CancellationToken ct = default)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = limit.ToString(),
+            ["cursor"] = cursor,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<ScanListItem>>>(HttpMethod.Get, "/v1/scans", null, query, ct)
+            .ConfigureAwait(false);
+        return new ScanListResult
+        {
+            Data = envelope?.Data ?? new List<ScanListItem>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = limit },
+        };
+    }
+
+    /// <summary>Async stream over every scan, walking the cursor automatically.</summary>
+    public async IAsyncEnumerable<ScanListItem> IterAllAsync(
+        int pageSize = 100,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        string? cursor = null;
+        while (true)
+        {
+            var page = await ListAsync(pageSize, cursor, ct).ConfigureAwait(false);
+            foreach (var item in page.Data) yield return item;
+            if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
+            cursor = page.Pagination.NextCursor;
+        }
     }
 }

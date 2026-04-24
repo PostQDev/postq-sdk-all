@@ -1,8 +1,16 @@
 name: Publish NuGet
 
+# Publishes PostQ.Sdk to NuGet.org when you push a tag like `dotnet-v0.2.0`.
+# The tag version MUST match the <Version> in sdks/dotnet/src/PostQ.Sdk/PostQ.Sdk.csproj.
+#
+# Required repo secret: NUGET_API_KEY (from https://www.nuget.org/account/apikeys,
+# scoped to "Push" with glob "PostQ.*").
+
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "dotnet-v*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -21,6 +29,16 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Verify csproj version matches tag
+        if: startsWith(github.ref, 'refs/tags/dotnet-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/dotnet-v}"
+          PKG_VERSION=$(grep -oE '<Version>[^<]+</Version>' src/PostQ.Sdk/PostQ.Sdk.csproj | head -1 | sed -E 's|</?Version>||g')
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match csproj <Version> ($PKG_VERSION)"
+            exit 1
+          fi
 
       - name: Restore
         run: dotnet restore

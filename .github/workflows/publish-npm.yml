@@ -1,8 +1,15 @@
 name: Publish npm
 
+# Publishes @postq/sdk to npmjs.com when you push a tag like `js-v0.2.0`.
+# The tag version MUST match the version in sdks/js/package.json.
+#
+# Required repo secret: NPM_TOKEN (granular access token, scope @postq, read+write).
+
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "js-v*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -28,6 +35,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify package.json version matches tag
+        if: startsWith(github.ref, 'refs/tags/js-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/js-v}"
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)"
+            exit 1
+          fi
 
       - name: Build
         run: npm run build

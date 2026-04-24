@@ -34,6 +34,25 @@ for scan in pq.scans.iter_all():
     ...
 ```
 
+## Assets and keys (0.3.0+)
+
+```python
+# Browse your cryptographic inventory
+assets = pq.assets.list(provider="aws", risk="high", limit=50)
+for a in assets.data:
+    print(a.name, a.algorithm, a.risk_level)
+
+# Or stream every asset
+for a in pq.assets.iter_all(environment="production"):
+    ...
+
+# Browse keys discovered by cloud scans
+keys = pq.keys.list(algorithm="RSA", quantum_vulnerable=True)
+for k in keys.data:
+    print(k.provider, k.region, k.key_id, k.algorithm)
+```
+```
+
 ## Configuration
 
 | Argument      | Default                  | Notes                                  |

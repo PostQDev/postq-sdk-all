@@ -44,6 +44,35 @@ await foreach (var scan in pq.Scans.IterAllAsync())
 }
 ```
 
+## Assets and keys (0.3.0+)
+
+```csharp
+// Browse your cryptographic inventory
+var assets = await pq.Assets.ListAsync(new AssetsListInput
+{
+    Provider = "aws",
+    Risk = "high",
+    Limit = 50,
+});
+foreach (var a in assets.Data)
+{
+    Console.WriteLine($"{a.Name}\t{a.Algorithm}\t{a.RiskLevel}");
+}
+
+// Or stream every asset
+await foreach (var a in pq.Assets.IterAllAsync(new AssetsListInput { Environment = "production" }))
+{
+    // ...
+}
+
+// Browse keys discovered by cloud scans
+var keys = await pq.Keys.ListAsync(new KeysListInput { Algorithm = "RSA", QuantumVulnerable = true });
+foreach (var k in keys.Data)
+{
+    Console.WriteLine($"{k.Provider}\t{k.Region}\t{k.KeyId}\t{k.Algorithm}");
+}
+```
+
 ## Configuration
 
 | Property   | Default                  | Notes                                  |

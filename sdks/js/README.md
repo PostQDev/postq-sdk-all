@@ -37,6 +37,27 @@ for await (const scan of pq.scans.iterAll()) {
 }
 ```
 
+## Assets and keys (0.3.0+)
+
+```ts
+// Browse your cryptographic inventory
+const assets = await pq.assets.list({ provider: "aws", risk: "high", limit: 50 });
+for (const a of assets.data) {
+  console.log(a.name, a.algorithm, a.riskLevel);
+}
+
+// Or stream every asset
+for await (const a of pq.assets.iterAll({ environment: "production" })) {
+  // ...
+}
+
+// Browse keys discovered by cloud scans
+const keys = await pq.keys.list({ algorithm: "RSA", quantumVulnerable: true });
+for (const k of keys.data) {
+  console.log(k.provider, k.region, k.keyId, k.algorithm);
+}
+```
+
 ## Configuration
 
 | Option      | Default                  | Notes                                       |

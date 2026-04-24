@@ -13,9 +13,15 @@ These wrap the [PostQ REST API](https://api.postq.dev) — submit quantum-risk s
 All three expose the same surface, idiomatic to each language:
 
 - `pq.scans.submit({...})` → `POST /v1/scans`
+- `pq.scans.submit_cloud({...})` / `submitCloud` / `SubmitCloudAsync` → `POST /v1/scans/cloud` (cloud KMS scans, **0.3.0+**)
 - `pq.scans.list({limit})` → `GET /v1/scans`
 - `pq.scans.iter_all()` / `iterAll()` / `IterAllAsync()` — auto-paginated stream
+- `pq.assets.list({...})` → `GET /v1/assets` (cryptographic inventory, **0.3.0+**)
+- `pq.keys.list({...})` → `GET /v1/keys` (key inventory, **0.3.0+**)
+- `pq.assets.iter_all()` / `pq.keys.iter_all()` and equivalents — auto-paginated
 - `pq.health()` → `GET /health`
+
+The full machine-readable API contract lives in [`postq-site/apps/api/openapi.yaml`](https://github.com/PostQDev/postq-site/blob/main/apps/api/openapi.yaml).
 
 Get an API key (`pq_live_…`) from your dashboard at <https://app.postq.dev>.
 

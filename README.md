@@ -4,11 +4,11 @@ Official PostQ SDKs for **JavaScript/TypeScript**, **Python**, and **.NET**.
 
 These wrap the [PostQ REST API](https://api.postq.dev) — submit quantum-risk scans from your own scanners or CI pipelines and read scan history for your org.
 
-| Language                 | Package      | Install                              | Source                            |
-| ------------------------ | ------------ | ------------------------------------ | --------------------------------- |
-| JavaScript / TypeScript  | `@postq/sdk` | `npm install @postq/sdk`             | [`sdks/js/`](sdks/js/)            |
-| Python                   | `postq-sdk`  | `pip install postq-sdk`              | [`sdks/python/`](sdks/python/)    |
-| .NET                     | `PostQ.Sdk`  | `dotnet add package PostQ.Sdk`       | [`sdks/dotnet/`](sdks/dotnet/)    |
+| Language                 | Package      | Install                              | Source                            | Status |
+| ------------------------ | ------------ | ------------------------------------ | --------------------------------- | ------ |
+| JavaScript / TypeScript  | [`@postq/sdk`](https://www.npmjs.com/package/@postq/sdk)      | `npm install @postq/sdk`             | [`sdks/js/`](sdks/js/)            | ![npm](https://img.shields.io/npm/v/@postq/sdk?label=) |
+| Python                   | [`postq-sdk`](https://pypi.org/project/postq-sdk/)            | `pip install postq-sdk`              | [`sdks/python/`](sdks/python/)    | ![PyPI](https://img.shields.io/pypi/v/postq-sdk?label=) |
+| .NET                     | [`PostQ.Sdk`](https://www.nuget.org/packages/PostQ.Sdk)       | `dotnet add package PostQ.Sdk`       | [`sdks/dotnet/`](sdks/dotnet/)    | ![NuGet](https://img.shields.io/nuget/v/PostQ.Sdk?label=) |
 
 All three expose the same surface, idiomatic to each language:
 

@@ -1,9 +1,10 @@
 name: Publish npm
 
-# Publishes @postq/sdk to npmjs.com when you push a tag like `js-v0.2.0`.
+# Publishes postq to npmjs.com when you push a tag like `js-v0.2.0`.
 # The tag version MUST match the version in sdks/js/package.json.
 #
-# Required repo secret: NPM_TOKEN (granular access token, scope @postq, read+write).
+# Required repo secret: NPM_TOKEN (granular token scoped to `postq`, or
+# Classic Automation token if your account requires 2FA on writes).
 
 on:
   push:
@@ -13,7 +14,7 @@ on:
 
 jobs:
   publish:
-    name: Publish @postq/sdk to npm
+    name: Publish postq to npm
     runs-on: ubuntu-latest
     defaults:
       run:

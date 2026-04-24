@@ -6,7 +6,7 @@ These wrap the [PostQ REST API](https://api.postq.dev) — submit quantum-risk s
 
 | Language                 | Package      | Install                              | Source                            |
 | ------------------------ | ------------ | ------------------------------------ | --------------------------------- |
-| JavaScript / TypeScript  | `@postq/sdk` | `npm install @postq/sdk`             | [`sdks/js/`](sdks/js/)            |
+| JavaScript / TypeScript  | `postq`      | `npm install postq`                  | [`sdks/js/`](sdks/js/)            |
 | Python                   | `postq-sdk`  | `pip install postq-sdk`              | [`sdks/python/`](sdks/python/)    |
 | .NET                     | `PostQ.Sdk`  | `dotnet add package PostQ.Sdk`       | [`sdks/dotnet/`](sdks/dotnet/)    |
 

@@ -1,15 +1,15 @@
-# @postq/sdk
+# postq
 
 Official PostQ SDK for JavaScript and TypeScript. Submit quantum-risk scans and read results from the [PostQ API](https://api.postq.dev).
 
 ```bash
-npm install @postq/sdk
+npm install postq
 ```
 
 ## Quickstart
 
 ```ts
-import { PostQ } from "@postq/sdk";
+import { PostQ } from "postq";
 
 const pq = new PostQ({ apiKey: process.env.POSTQ_API_KEY! });
 
@@ -51,7 +51,7 @@ for await (const scan of pq.scans.iterAll()) {
 All errors extend `PostQError`. Catch the base class to catch them all:
 
 ```ts
-import { PostQ, PostQAuthError, PostQRateLimitError } from "@postq/sdk";
+import { PostQ, PostQAuthError, PostQRateLimitError } from "postq";
 
 try {
   await pq.scans.list();

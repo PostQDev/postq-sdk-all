@@ -51,6 +51,9 @@ public sealed class PostQClient : IDisposable
     /// <summary>Operations under <c>/v1/keys</c>.</summary>
     public KeysResource Keys { get; }
 
+    /// <summary>Operations under <c>/v1/hybrid-keys</c>, <c>/v1/sign</c>, and <c>/v1/verify</c>.</summary>
+    public HybridKeysResource HybridKeys { get; }
+
     /// <summary>Construct a new client.</summary>
     /// <param name="options">Required configuration. Must include an API key.</param>
     /// <param name="httpClient">
@@ -78,6 +81,7 @@ public sealed class PostQClient : IDisposable
         Scans = new ScansResource(this);
         Assets = new AssetsResource(this);
         Keys = new KeysResource(this);
+        HybridKeys = new HybridKeysResource(this);
     }
 
     /// <summary>Hit <c>GET /health</c>. Throws if the API is down.</summary>
@@ -86,6 +90,14 @@ public sealed class PostQClient : IDisposable
         return await SendAsync<JsonElement>(HttpMethod.Get, "/health", null, null, ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary><c>POST /v1/sign</c> — convenience wrapper around <see cref="HybridKeysResource.SignAsync"/>.</summary>
+    public Task<HybridSignResult> SignAsync(HybridSignInput input, CancellationToken ct = default)
+        => HybridKeys.SignAsync(input, ct);
+
+    /// <summary><c>POST /v1/verify</c> — convenience wrapper around <see cref="HybridKeysResource.VerifyAsync"/>.</summary>
+    public Task<HybridVerifyResult> VerifyAsync(HybridVerifyInput input, CancellationToken ct = default)
+        => HybridKeys.VerifyAsync(input, ct);
 
     /// <inheritdoc/>
     public void Dispose()
@@ -377,5 +389,139 @@ public sealed class KeysResource
             if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
             cursor = page.Pagination.NextCursor;
         }
+    }
+}
+
+/// <summary>
+/// Operations under <c>/v1/hybrid-keys</c>, <c>/v1/sign</c>, and <c>/v1/verify</c>.
+///
+/// A <em>hybrid key</em> is a PostQ-managed signing key whose public component
+/// is a composite of an Ed25519 public key and an ML-DSA public key. Every
+/// signature produced by <see cref="SignAsync"/> only validates when BOTH
+/// halves verify, so a future break in either Ed25519 OR ML-DSA does not
+/// allow forgery on its own.
+/// </summary>
+public sealed class HybridKeysResource
+{
+    private readonly PostQClient _client;
+
+    internal HybridKeysResource(PostQClient client) => _client = client;
+
+    /// <summary><c>POST /v1/hybrid-keys</c> — create a new managed signing key.</summary>
+    public async Task<HybridKeyWithPublic> CreateAsync(
+        HybridKeyCreateInput input,
+        CancellationToken ct = default)
+    {
+        var body = new
+        {
+            name = input.Name,
+            algorithm = input.Algorithm,
+            metadata = input.Metadata ?? new Dictionary<string, object?>(),
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<HybridKeyWithPublic>>(
+                HttpMethod.Post, "/v1/hybrid-keys", body, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException("API returned no data for POST /v1/hybrid-keys");
+        }
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/hybrid-keys</c> — one page of managed signing keys.</summary>
+    public async Task<HybridKeyListResult> ListAsync(
+        HybridKeyListOptions? options = null,
+        CancellationToken ct = default)
+    {
+        var opts = options ?? new HybridKeyListOptions();
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = opts.Limit.ToString(),
+            ["cursor"] = opts.Cursor,
+            ["algorithm"] = opts.Algorithm,
+            ["includeRevoked"] = opts.IncludeRevoked ? "true" : null,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<HybridKey>>>(
+                HttpMethod.Get, "/v1/hybrid-keys", null, query, ct)
+            .ConfigureAwait(false);
+        return new HybridKeyListResult
+        {
+            Data = envelope?.Data ?? new List<HybridKey>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = opts.Limit },
+        };
+    }
+
+    /// <summary><c>GET /v1/hybrid-keys/:id</c> — fetch a single key including its public bytes.</summary>
+    public async Task<HybridKeyWithPublic> GetAsync(string keyId, CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<HybridKeyWithPublic>>(
+                HttpMethod.Get, $"/v1/hybrid-keys/{Uri.EscapeDataString(keyId)}", null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQNotFoundException("Key not found", null);
+        }
+        return envelope.Data;
+    }
+
+    /// <summary><c>DELETE /v1/hybrid-keys/:id</c> — revoke a key (existing signatures still verify).</summary>
+    public async Task RevokeAsync(string keyId, CancellationToken ct = default)
+    {
+        await _client
+            .SendAsync<ApiEnvelope<JsonElement>>(
+                HttpMethod.Delete, $"/v1/hybrid-keys/{Uri.EscapeDataString(keyId)}", null, null, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary><c>POST /v1/sign</c> — sign <paramref name="input"/>.Payload with the named hybrid key.</summary>
+    public async Task<HybridSignResult> SignAsync(
+        HybridSignInput input,
+        CancellationToken ct = default)
+    {
+        var body = new
+        {
+            keyId = input.KeyId,
+            payload = Convert.ToBase64String(input.Payload),
+            metadata = input.Metadata ?? new Dictionary<string, object?>(),
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<HybridSignResult>>(
+                HttpMethod.Post, "/v1/sign", body, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException("API returned no data for POST /v1/sign");
+        }
+        return envelope.Data;
+    }
+
+    /// <summary><c>POST /v1/verify</c> — verify a composite signature.</summary>
+    public async Task<HybridVerifyResult> VerifyAsync(
+        HybridVerifyInput input,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(input.KeyId) && string.IsNullOrEmpty(input.PublicKey))
+        {
+            throw new PostQConfigException("VerifyAsync requires either KeyId or PublicKey.");
+        }
+        var body = new
+        {
+            keyId = input.KeyId,
+            publicKey = input.PublicKey,
+            payload = Convert.ToBase64String(input.Payload),
+            signature = input.Signature,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<HybridVerifyResult>>(
+                HttpMethod.Post, "/v1/verify", body, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException("API returned no data for POST /v1/verify");
+        }
+        return envelope.Data;
     }
 }

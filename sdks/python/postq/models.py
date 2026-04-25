@@ -89,3 +89,52 @@ class Key:
     key_usage: Optional[str] = None
     scan_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+# ─────────────────────────── Hybrid Signing ───────────────────────────
+
+HybridAlgorithm = str  # "mldsa44+ed25519" | "mldsa65+ed25519" | "mldsa87+ed25519"
+
+
+@dataclass
+class HybridKey:
+    """A managed signing key owned by your PostQ org."""
+
+    id: str
+    name: str
+    algorithm: HybridAlgorithm
+    created_at: str
+    revoked_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class HybridKeyWithPublic(HybridKey):
+    """A managed key plus its composite public key (JSON string)."""
+
+    # NOTE: dataclass requires defaults for fields that follow defaulted ones,
+    # so this carries an empty default and is always set in practice.
+    public_key: str = ""
+
+
+@dataclass
+class HybridSignResult:
+    """Returned by :meth:`PostQ.sign`."""
+
+    key_id: str
+    algorithm: HybridAlgorithm
+    signature: str  # base64 composite signature
+    public_key: str  # composite public key JSON
+    payload_sha256: str
+    payload_size: int
+
+
+@dataclass
+class HybridVerifyResult:
+    """Returned by :meth:`PostQ.verify`."""
+
+    ok: bool
+    algorithm: HybridAlgorithm
+    classical_ok: bool
+    pq_ok: bool

@@ -20,7 +20,18 @@ from .errors import (
     PostQRateLimitError,
     PostQServerError,
 )
-from .models import Asset, Finding, Key, ScanListItem, ScanSubmitResult
+from .models import (
+    Asset,
+    Finding,
+    HybridAlgorithm,
+    HybridKey,
+    HybridKeyWithPublic,
+    HybridSignResult,
+    HybridVerifyResult,
+    Key,
+    ScanListItem,
+    ScanSubmitResult,
+)
 
 DEFAULT_BASE_URL = "https://api.postq.dev"
 
@@ -67,7 +78,7 @@ class PostQ:
             total=max_retries,
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST"],
+            allowed_methods=["GET", "POST", "DELETE"],
             respect_retry_after_header=True,
             # Surface the final response so we can map it to the right exception
             # type instead of urllib3 raising MaxRetryError.
@@ -91,12 +102,36 @@ class PostQ:
         self.scans = ScansResource(self)
         self.assets = AssetsResource(self)
         self.keys = KeysResource(self)
+        self.hybrid_keys = HybridKeysResource(self)
 
     # ── public ──────────────────────────────────────────────────────────────
 
     def health(self) -> "dict[str, Any]":
         """Hit ``GET /health``. Returns the parsed JSON or raises."""
         return self._request("GET", "/health")
+
+    def sign(
+        self,
+        *,
+        key_id: str,
+        payload: Union[bytes, str],
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> HybridSignResult:
+        """``POST /v1/sign`` — convenience wrapper around ``hybrid_keys.sign()``."""
+        return self.hybrid_keys.sign(key_id=key_id, payload=payload, metadata=metadata)
+
+    def verify(
+        self,
+        *,
+        payload: Union[bytes, str],
+        signature: str,
+        key_id: Optional[str] = None,
+        public_key: Optional[str] = None,
+    ) -> HybridVerifyResult:
+        """``POST /v1/verify`` — convenience wrapper around ``hybrid_keys.verify()``."""
+        return self.hybrid_keys.verify(
+            payload=payload, signature=signature, key_id=key_id, public_key=public_key
+        )
 
     def close(self) -> None:
         self._session.close()
@@ -407,4 +442,155 @@ def _row_to_key(row: Mapping[str, Any]) -> Key:
         key_usage=row.get("keyUsage"),
         scan_id=row.get("scanId"),
         metadata=dict(row.get("metadata") or {}),
+    )
+
+
+class HybridKeysResource:
+    """Operations under ``/v1/hybrid-keys``, ``/v1/sign``, and ``/v1/verify``.
+
+    A *hybrid key* is a PostQ-managed signing key whose public component is a
+    composite of an Ed25519 public key and an ML-DSA public key. Every signature
+    produced by :meth:`sign` validates only when BOTH halves verify.
+    """
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def create(
+        self,
+        *,
+        name: str,
+        algorithm: HybridAlgorithm = "mldsa65+ed25519",
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> HybridKeyWithPublic:
+        """``POST /v1/hybrid-keys`` — create a new managed signing key."""
+        body = self._client._request(
+            "POST",
+            "/v1/hybrid-keys",
+            json={
+                "name": name,
+                "algorithm": algorithm,
+                "metadata": dict(metadata or {}),
+            },
+        )
+        return _row_to_hybrid_key_with_public(body["data"])
+
+    def list(
+        self,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+        algorithm: Optional[HybridAlgorithm] = None,
+        include_revoked: bool = False,
+    ) -> "list[HybridKey]":
+        """``GET /v1/hybrid-keys`` — one page of managed signing keys."""
+        params = _strip_none(
+            {
+                "limit": limit,
+                "cursor": cursor,
+                "algorithm": algorithm,
+                "includeRevoked": "true" if include_revoked else None,
+            }
+        )
+        body = self._client._request("GET", "/v1/hybrid-keys", params=params)
+        return [_row_to_hybrid_key(row) for row in body["data"]]
+
+    def get(self, key_id: str) -> HybridKeyWithPublic:
+        """``GET /v1/hybrid-keys/:id`` — fetch one key including public bytes."""
+        body = self._client._request("GET", f"/v1/hybrid-keys/{key_id}")
+        return _row_to_hybrid_key_with_public(body["data"])
+
+    def revoke(self, key_id: str) -> "dict[str, Any]":
+        """``DELETE /v1/hybrid-keys/:id`` — revoke (soft-delete) a key."""
+        body = self._client._request("DELETE", f"/v1/hybrid-keys/{key_id}")
+        return body["data"]
+
+    def sign(
+        self,
+        *,
+        key_id: str,
+        payload: Union[bytes, str],
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> HybridSignResult:
+        """``POST /v1/sign`` — sign ``payload`` with the named hybrid key."""
+        body = self._client._request(
+            "POST",
+            "/v1/sign",
+            json={
+                "keyId": key_id,
+                "payload": _b64(payload),
+                "metadata": dict(metadata or {}),
+            },
+        )
+        d = body["data"]
+        return HybridSignResult(
+            key_id=d["keyId"],
+            algorithm=d["algorithm"],
+            signature=d["signature"],
+            public_key=d["publicKey"],
+            payload_sha256=d["payloadSha256"],
+            payload_size=d["payloadSize"],
+        )
+
+    def verify(
+        self,
+        *,
+        payload: Union[bytes, str],
+        signature: str,
+        key_id: Optional[str] = None,
+        public_key: Optional[str] = None,
+    ) -> HybridVerifyResult:
+        """``POST /v1/verify`` — verify a composite signature."""
+        if not key_id and not public_key:
+            raise PostQConfigError("verify() requires either key_id or public_key")
+        body = self._client._request(
+            "POST",
+            "/v1/verify",
+            json=_strip_none(
+                {
+                    "keyId": key_id,
+                    "publicKey": public_key,
+                    "payload": _b64(payload),
+                    "signature": signature,
+                }
+            ),
+        )
+        d = body["data"]
+        return HybridVerifyResult(
+            ok=bool(d["ok"]),
+            algorithm=d["algorithm"],
+            classical_ok=bool(d["classicalOk"]),
+            pq_ok=bool(d["pqOk"]),
+        )
+
+
+def _b64(payload: Union[bytes, str]) -> str:
+    import base64
+
+    raw = payload.encode("utf-8") if isinstance(payload, str) else payload
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _row_to_hybrid_key(row: Mapping[str, Any]) -> HybridKey:
+    return HybridKey(
+        id=row["id"],
+        name=row["name"],
+        algorithm=row["algorithm"],
+        created_at=row["createdAt"],
+        revoked_at=row.get("revokedAt"),
+        last_used_at=row.get("lastUsedAt"),
+        metadata=dict(row.get("metadata") or {}),
+    )
+
+
+def _row_to_hybrid_key_with_public(row: Mapping[str, Any]) -> HybridKeyWithPublic:
+    return HybridKeyWithPublic(
+        id=row["id"],
+        name=row["name"],
+        algorithm=row["algorithm"],
+        created_at=row["createdAt"],
+        revoked_at=row.get("revokedAt"),
+        last_used_at=row.get("lastUsedAt"),
+        metadata=dict(row.get("metadata") or {}),
+        public_key=row["publicKey"],
     )

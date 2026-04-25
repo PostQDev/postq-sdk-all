@@ -257,3 +257,132 @@ public sealed class KeyListResult
     /// <summary>Pagination metadata.</summary>
     public required Pagination Pagination { get; init; }
 }
+
+/* ─────────────────────────── Hybrid Signing ─────────────────────────── */
+
+/// <summary>A managed signing key owned by your PostQ org.</summary>
+public sealed class HybridKey
+{
+    /// <summary>Key ID.</summary>
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    /// <summary>Human-readable name supplied at creation.</summary>
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    /// <summary>e.g. <c>mldsa65+ed25519</c>.</summary>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <summary>ISO 8601 timestamp the key was created.</summary>
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    /// <summary>ISO 8601 timestamp the key was revoked, or null.</summary>
+    [JsonPropertyName("revokedAt")] public string? RevokedAt { get; init; }
+    /// <summary>ISO 8601 timestamp of last sign/verify, or null.</summary>
+    [JsonPropertyName("lastUsedAt")] public string? LastUsedAt { get; init; }
+    /// <summary>Free-form metadata.</summary>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+}
+
+/// <summary>A hybrid key returned with its composite public key (JSON string).</summary>
+public sealed class HybridKeyWithPublic
+{
+    /// <inheritdoc cref="HybridKey.Id"/>
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    /// <inheritdoc cref="HybridKey.Name"/>
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    /// <inheritdoc cref="HybridKey.Algorithm"/>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <inheritdoc cref="HybridKey.CreatedAt"/>
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    /// <inheritdoc cref="HybridKey.RevokedAt"/>
+    [JsonPropertyName("revokedAt")] public string? RevokedAt { get; init; }
+    /// <inheritdoc cref="HybridKey.LastUsedAt"/>
+    [JsonPropertyName("lastUsedAt")] public string? LastUsedAt { get; init; }
+    /// <summary>Composite public key as JSON: <c>{"v":1,"alg":...,"classical":...,"pq":...}</c>.</summary>
+    [JsonPropertyName("publicKey")] public required string PublicKey { get; init; }
+    /// <inheritdoc cref="HybridKey.Metadata"/>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+}
+
+/// <summary>Input for <see cref="HybridKeysResource.CreateAsync"/>.</summary>
+public sealed class HybridKeyCreateInput
+{
+    /// <summary>Required. Human-readable label.</summary>
+    public required string Name { get; init; }
+    /// <summary>Defaults to <c>mldsa65+ed25519</c>.</summary>
+    public string Algorithm { get; init; } = "mldsa65+ed25519";
+    /// <summary>Free-form metadata stored alongside the key.</summary>
+    public Dictionary<string, object?>? Metadata { get; init; }
+}
+
+/// <summary>Filters for <see cref="HybridKeysResource.ListAsync"/>.</summary>
+public sealed class HybridKeyListOptions
+{
+    /// <summary>Page size (1–100). Defaults to 20.</summary>
+    public int Limit { get; init; } = 20;
+    /// <summary>Cursor returned by a previous call.</summary>
+    public string? Cursor { get; init; }
+    /// <summary>Exact algorithm match.</summary>
+    public string? Algorithm { get; init; }
+    /// <summary>If true, includes revoked keys.</summary>
+    public bool IncludeRevoked { get; init; }
+}
+
+/// <summary>Response from <see cref="HybridKeysResource.ListAsync"/>.</summary>
+public sealed class HybridKeyListResult
+{
+    /// <summary>Keys on this page.</summary>
+    public required IReadOnlyList<HybridKey> Data { get; init; }
+    /// <summary>Pagination metadata.</summary>
+    public required Pagination Pagination { get; init; }
+}
+
+/// <summary>Input for <see cref="PostQClient.SignAsync"/>.</summary>
+public sealed class HybridSignInput
+{
+    /// <summary>The signing key to use.</summary>
+    public required string KeyId { get; init; }
+    /// <summary>Raw bytes to sign. The SDK base64-encodes this for the wire.</summary>
+    public required byte[] Payload { get; init; }
+    /// <summary>Free-form metadata stored on the audit row.</summary>
+    public Dictionary<string, object?>? Metadata { get; init; }
+}
+
+/// <summary>Returned by <see cref="PostQClient.SignAsync"/>.</summary>
+public sealed class HybridSignResult
+{
+    /// <summary>The key used for signing.</summary>
+    [JsonPropertyName("keyId")] public required string KeyId { get; init; }
+    /// <summary>Algorithm used.</summary>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <summary>Base64 composite signature. Pass back to <see cref="PostQClient.VerifyAsync"/>.</summary>
+    [JsonPropertyName("signature")] public required string Signature { get; init; }
+    /// <summary>Composite public key JSON string.</summary>
+    [JsonPropertyName("publicKey")] public required string PublicKey { get; init; }
+    /// <summary>Hex-encoded SHA-256 of the signed payload.</summary>
+    [JsonPropertyName("payloadSha256")] public required string PayloadSha256 { get; init; }
+    /// <summary>Length of the signed payload in bytes.</summary>
+    [JsonPropertyName("payloadSize")] public int PayloadSize { get; init; }
+}
+
+/// <summary>Input for <see cref="PostQClient.VerifyAsync"/>.</summary>
+public sealed class HybridVerifyInput
+{
+    /// <summary>Original payload bytes. The SDK base64-encodes this for the wire.</summary>
+    public required byte[] Payload { get; init; }
+    /// <summary>Base64 composite signature returned by <see cref="HybridSignResult.Signature"/>.</summary>
+    public required string Signature { get; init; }
+    /// <summary>One of <see cref="KeyId"/> or <see cref="PublicKey"/> is required.</summary>
+    public string? KeyId { get; init; }
+    /// <summary>Composite public key JSON for offline verification.</summary>
+    public string? PublicKey { get; init; }
+}
+
+/// <summary>Returned by <see cref="PostQClient.VerifyAsync"/>.</summary>
+public sealed class HybridVerifyResult
+{
+    /// <summary>True iff BOTH the classical and PQ halves verified.</summary>
+    [JsonPropertyName("ok")] public bool Ok { get; init; }
+    /// <summary>Algorithm declared in the signature envelope.</summary>
+    [JsonPropertyName("algorithm")] public required string Algorithm { get; init; }
+    /// <summary>Whether the Ed25519 half verified.</summary>
+    [JsonPropertyName("classicalOk")] public bool ClassicalOk { get; init; }
+    /// <summary>Whether the ML-DSA half verified.</summary>
+    [JsonPropertyName("pqOk")] public bool PqOk { get; init; }
+}

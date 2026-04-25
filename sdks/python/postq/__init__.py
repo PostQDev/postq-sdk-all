@@ -22,9 +22,9 @@ Example::
 """
 from __future__ import annotations
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
-from .client import AssetsResource, KeysResource, PostQ, ScansResource
+from .client import AssetsResource, HybridKeysResource, KeysResource, PostQ, ScansResource
 from .errors import (
     PostQAuthError,
     PostQConfigError,
@@ -34,7 +34,18 @@ from .errors import (
     PostQRateLimitError,
     PostQServerError,
 )
-from .models import Asset, Finding, Key, ScanListItem, ScanSubmitResult
+from .models import (
+    Asset,
+    Finding,
+    HybridAlgorithm,
+    HybridKey,
+    HybridKeyWithPublic,
+    HybridSignResult,
+    HybridVerifyResult,
+    Key,
+    ScanListItem,
+    ScanSubmitResult,
+)
 
 __all__ = [
     "__version__",
@@ -42,6 +53,7 @@ __all__ = [
     "ScansResource",
     "AssetsResource",
     "KeysResource",
+    "HybridKeysResource",
     "PostQError",
     "PostQConfigError",
     "PostQAuthError",
@@ -54,4 +66,9 @@ __all__ = [
     "ScanSubmitResult",
     "Asset",
     "Key",
+    "HybridAlgorithm",
+    "HybridKey",
+    "HybridKeyWithPublic",
+    "HybridSignResult",
+    "HybridVerifyResult",
 ]

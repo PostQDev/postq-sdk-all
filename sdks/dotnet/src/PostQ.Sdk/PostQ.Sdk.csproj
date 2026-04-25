@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>PostQ.Sdk</PackageId>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Authors>PostQ</Authors>
     <Description>Official PostQ SDK for .NET — submit quantum-risk scans and read results from the PostQ API.</Description>
     <PackageTags>postq;quantum;cryptography;post-quantum;security;tls;scanner;sdk</PackageTags>

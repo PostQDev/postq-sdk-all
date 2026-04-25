@@ -186,3 +186,92 @@ export interface KeyListResult {
   data: Key[];
   pagination: Pagination;
 }
+
+/* ─────────────────────────── Hybrid Signing ─────────────────────────── */
+
+/**
+ * PostQ-managed composite signing algorithm.
+ *
+ * Each algorithm pairs a NIST-standardized post-quantum signature (FIPS 204
+ * ML-DSA) with classical Ed25519. Verification requires BOTH halves to
+ * validate, so a future break in either Ed25519 OR ML-DSA does not allow
+ * forgery on its own.
+ */
+export type HybridAlgorithm =
+  | "mldsa44+ed25519"
+  | "mldsa65+ed25519"
+  | "mldsa87+ed25519";
+
+/** A managed signing key owned by your org. */
+export interface HybridKey {
+  id: string;
+  name: string;
+  algorithm: HybridAlgorithm;
+  /** ISO-8601. Set when the key is revoked; null otherwise. */
+  revokedAt: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  metadata: Record<string, unknown>;
+}
+
+/** Returned from `hybridKeys.create()` and `hybridKeys.get()`. */
+export interface HybridKeyWithPublic extends HybridKey {
+  /**
+   * Composite public key as a JSON string:
+   * `{"v":1,"alg":"mldsa65+ed25519","classical":"<b64>","pq":"<b64>"}`.
+   * Hand this to anyone who needs to verify your signatures offline.
+   */
+  publicKey: string;
+}
+
+export interface HybridKeyCreateInput {
+  name: string;
+  algorithm?: HybridAlgorithm;
+  metadata?: Record<string, unknown>;
+}
+
+export interface HybridKeyListOptions {
+  limit?: number;
+  cursor?: string;
+  algorithm?: HybridAlgorithm;
+  includeRevoked?: boolean;
+}
+
+export interface HybridKeyListResult {
+  data: HybridKey[];
+  pagination: Pagination;
+}
+
+export interface HybridSignInput {
+  keyId: string;
+  /** Raw bytes to sign. SDK base64-encodes this for the wire. */
+  payload: Uint8Array | string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface HybridSignResult {
+  keyId: string;
+  algorithm: HybridAlgorithm;
+  /** Base64-encoded composite signature. Pass directly to `verify()`. */
+  signature: string;
+  /** Composite public key JSON. Distribute to verifiers. */
+  publicKey: string;
+  payloadSha256: string;
+  payloadSize: number;
+}
+
+export interface HybridVerifyInput {
+  payload: Uint8Array | string;
+  signature: string;
+  /** One of `keyId` or `publicKey` is required. */
+  keyId?: string;
+  publicKey?: string;
+}
+
+export interface HybridVerifyResult {
+  ok: boolean;
+  algorithm: HybridAlgorithm;
+  /** Per-component breakdown — useful when one half is misbehaving. */
+  classicalOk: boolean;
+  pqOk: boolean;
+}

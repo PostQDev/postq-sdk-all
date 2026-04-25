@@ -20,10 +20,20 @@ import {
   Key,
   KeyListOptions,
   KeyListResult,
+  Pagination,
+  HybridKey,
+  HybridKeyCreateInput,
+  HybridKeyListOptions,
+  HybridKeyListResult,
+  HybridKeyWithPublic,
+  HybridSignInput,
+  HybridSignResult,
+  HybridVerifyInput,
+  HybridVerifyResult,
 } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.postq.dev";
-const SDK_VERSION = "0.3.0";
+const SDK_VERSION = "0.4.0";
 
 /**
  * PostQ SDK client.
@@ -50,6 +60,7 @@ export class PostQ {
   readonly scans: ScansResource;
   readonly assets: AssetsResource;
   readonly keys: KeysResource;
+  readonly hybridKeys: HybridKeysResource;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -77,6 +88,7 @@ export class PostQ {
     this.scans = new ScansResource(this);
     this.assets = new AssetsResource(this);
     this.keys = new KeysResource(this);
+    this.hybridKeys = new HybridKeysResource(this);
   }
 
   /** Hit `GET /health`. Throws if the API is down. */
@@ -84,9 +96,25 @@ export class PostQ {
     return this.request<HealthResult>("GET", "/health");
   }
 
+  /**
+   * `POST /v1/sign` — sign `payload` with a managed hybrid key.
+   * Convenience wrapper around `hybridKeys.sign()`.
+   */
+  sign(input: HybridSignInput): Promise<HybridSignResult> {
+    return this.hybridKeys.sign(input);
+  }
+
+  /**
+   * `POST /v1/verify` — verify a composite signature.
+   * Convenience wrapper around `hybridKeys.verify()`.
+   */
+  verify(input: HybridVerifyInput): Promise<HybridVerifyResult> {
+    return this.hybridKeys.verify(input);
+  }
+
   /** @internal */
   async request<T>(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     opts: { body?: unknown; query?: Record<string, string | number | boolean | undefined> } = {},
   ): Promise<T> {
@@ -277,7 +305,7 @@ export class KeysResource {
     return { data: envelope.data, pagination: envelope.pagination };
   }
 
-  /** Walk every key across pages. */
+  /** Walk every discovered key across pages. */
   async *iterAll(
     opts: KeyListOptions & { pageSize?: number } = {},
   ): AsyncIterableIterator<Key> {
@@ -290,4 +318,112 @@ export class KeysResource {
       cursor = page.pagination.nextCursor;
     }
   }
+}
+
+/**
+ * Hybrid signing — create / list / revoke PostQ-managed signing keys, and
+ * call `POST /v1/sign` and `POST /v1/verify`.
+ *
+ * Every key signs with BOTH a post-quantum algorithm (ML-DSA) and Ed25519.
+ * Verification requires both halves, so a future break in either alone does
+ * not allow forgery.
+ *
+ * @example
+ * ```ts
+ * const k = await pq.hybridKeys.create({ name: "release-signing", algorithm: "mldsa65+ed25519" });
+ * const sig = await pq.sign({ keyId: k.id, payload: new TextEncoder().encode("ship it") });
+ * const ok = await pq.verify({ keyId: k.id, payload: "ship it", signature: sig.signature });
+ * ```
+ */
+export class HybridKeysResource {
+  constructor(private readonly client: PostQ) {}
+
+  /** `POST /v1/hybrid-keys` — create a new managed signing key. */
+  async create(input: HybridKeyCreateInput): Promise<HybridKeyWithPublic> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: HybridKeyWithPublic;
+    }>("POST", "/v1/hybrid-keys", { body: input });
+    return envelope.data;
+  }
+
+  /** `GET /v1/hybrid-keys` — one page of managed signing keys. */
+  async list(opts: HybridKeyListOptions = {}): Promise<HybridKeyListResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: HybridKey[];
+      pagination: Pagination;
+    }>("GET", "/v1/hybrid-keys", {
+      query: {
+        limit: opts.limit ?? 20,
+        cursor: opts.cursor,
+        algorithm: opts.algorithm,
+        includeRevoked: opts.includeRevoked,
+      },
+    });
+    return { data: envelope.data, pagination: envelope.pagination };
+  }
+
+  /** `GET /v1/hybrid-keys/:id` — fetch one key, including its public key. */
+  async get(id: string): Promise<HybridKeyWithPublic> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: HybridKeyWithPublic;
+    }>("GET", `/v1/hybrid-keys/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  /**
+   * `DELETE /v1/hybrid-keys/:id` — revoke a key. Existing signatures continue
+   * to verify; new sign calls return 409.
+   */
+  async revoke(id: string): Promise<{ id: string; revokedAt: string }> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: { id: string; revokedAt: string };
+    }>("DELETE", `/v1/hybrid-keys/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  /** `POST /v1/sign`. */
+  async sign(input: HybridSignInput): Promise<HybridSignResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: HybridSignResult;
+    }>("POST", "/v1/sign", {
+      body: {
+        keyId: input.keyId,
+        payload: encodeBase64(input.payload),
+        metadata: input.metadata,
+      },
+    });
+    return envelope.data;
+  }
+
+  /** `POST /v1/verify`. */
+  async verify(input: HybridVerifyInput): Promise<HybridVerifyResult> {
+    if (!input.keyId && !input.publicKey) {
+      throw new Error("verify() requires either keyId or publicKey");
+    }
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: HybridVerifyResult;
+    }>("POST", "/v1/verify", {
+      body: {
+        keyId: input.keyId,
+        publicKey: input.publicKey,
+        payload: encodeBase64(input.payload),
+        signature: input.signature,
+      },
+    });
+    return envelope.data;
+  }
+}
+
+function encodeBase64(payload: Uint8Array | string): string {
+  if (typeof payload === "string") {
+    // Assume UTF-8 text; if the caller already has base64 they should pass bytes.
+    return Buffer.from(payload, "utf8").toString("base64");
+  }
+  return Buffer.from(payload).toString("base64");
 }

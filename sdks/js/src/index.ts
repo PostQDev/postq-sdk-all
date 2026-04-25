@@ -1,4 +1,4 @@
-export { PostQ, ScansResource, AssetsResource, KeysResource } from "./client";
+export { PostQ, ScansResource, AssetsResource, KeysResource, HybridKeysResource } from "./client";
 export {
   PostQError,
   PostQConfigError,
@@ -32,4 +32,14 @@ export type {
   Key,
   KeyListOptions,
   KeyListResult,
+  HybridAlgorithm,
+  HybridKey,
+  HybridKeyWithPublic,
+  HybridKeyCreateInput,
+  HybridKeyListOptions,
+  HybridKeyListResult,
+  HybridSignInput,
+  HybridSignResult,
+  HybridVerifyInput,
+  HybridVerifyResult,
 } from "./types";

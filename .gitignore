@@ -18,3 +18,7 @@ sdks/dotnet/**/obj/
 sdks/dotnet/*.user
 sdks/dotnet/.vs/
 sdks/dotnet/nupkgs/
+
+# macOS
+.DS_Store
+**/.DS_Store

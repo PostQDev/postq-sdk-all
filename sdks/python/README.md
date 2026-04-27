@@ -32,6 +32,14 @@ for scan in pq.scans.list(limit=10):
 # Iterate every scan with automatic pagination
 for scan in pq.scans.iter_all():
     ...
+
+# Fetch a full scan record (HNDL, certificate, TLS, normalized findings)
+detail = pq.scans.get(result.id)
+print(detail.hndl.severity if detail.hndl else None,
+      detail.certificate.days_until_expiry if detail.certificate else None)
+
+# Download the CycloneDX 1.6 CBOM for a scan
+cbom = pq.scans.cbom(result.id)  # parsed dict
 ```
 
 ## Assets and keys (0.3.0+)

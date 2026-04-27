@@ -35,6 +35,14 @@ for (const scan of page.data) {
 for await (const scan of pq.scans.iterAll()) {
   // ...
 }
+
+// Fetch a full scan record (HNDL, certificate, TLS, normalized findings)
+const detail = await pq.scans.get(result.id);
+console.log(detail.hndl?.severity, detail.certificate?.daysUntilExpiry);
+
+// Download the CycloneDX 1.6 CBOM for a scan
+const cbom = await pq.scans.cbom(result.id);            // parsed object
+const raw = await pq.scans.cbom(result.id, { raw: true }); // JSON string
 ```
 
 ## Assets and keys (0.3.0+)

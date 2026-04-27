@@ -42,6 +42,13 @@ await foreach (var scan in pq.Scans.IterAllAsync())
 {
     // ...
 }
+
+// Fetch a full scan record (HNDL, certificate, TLS, normalized findings)
+ScanDetail detail = await pq.Scans.GetAsync(result.Id);
+Console.WriteLine($"{detail.Hndl?.Severity} cert expires in {detail.Certificate?.DaysUntilExpiry} days");
+
+// Download the CycloneDX 1.6 CBOM for a scan
+JsonElement cbom = await pq.Scans.GetCbomAsync(result.Id);
 ```
 
 ## Assets and keys (0.3.0+)

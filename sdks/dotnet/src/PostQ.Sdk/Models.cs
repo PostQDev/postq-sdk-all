@@ -120,6 +120,123 @@ public sealed class ScanListResult
     public required Pagination Pagination { get; init; }
 }
 
+/// <summary>"Harvest now, decrypt later" risk assessment for a scan target.</summary>
+public sealed class HndlAssessment
+{
+    /// <summary>Numeric HNDL exposure score (0–100).</summary>
+    [JsonPropertyName("score")] public int Score { get; init; }
+    /// <summary>Severity bucket (LOW | MEDIUM | HIGH | CRITICAL).</summary>
+    [JsonPropertyName("severity")] public string? Severity { get; init; }
+    /// <summary>Years of overlap between data lifetime and CRQC arrival.</summary>
+    [JsonPropertyName("exposureWindowYears")] public double? ExposureWindowYears { get; init; }
+    /// <summary>Estimated year a cryptographically relevant quantum computer arrives.</summary>
+    [JsonPropertyName("crqcBreakYear")] public int? CrqcBreakYear { get; init; }
+    /// <summary>Assumed lifetime of the protected data, in years.</summary>
+    [JsonPropertyName("dataLifetimeYears")] public int? DataLifetimeYears { get; init; }
+    /// <summary>True if the target uses a post-quantum-safe primitive.</summary>
+    [JsonPropertyName("pqSafe")] public bool? PqSafe { get; init; }
+    /// <summary>Human-readable explanation of the score.</summary>
+    [JsonPropertyName("rationale")] public string? Rationale { get; init; }
+    /// <summary>Suggested remediation summary.</summary>
+    [JsonPropertyName("recommendation")] public string? Recommendation { get; init; }
+}
+
+/// <summary>Certificate metadata captured during a URL scan.</summary>
+public sealed class CertificateInfo
+{
+    /// <summary>Certificate subject DN.</summary>
+    [JsonPropertyName("subject")] public string? Subject { get; init; }
+    /// <summary>Certificate issuer DN.</summary>
+    [JsonPropertyName("issuer")] public string? Issuer { get; init; }
+    /// <summary>NotBefore (ISO 8601).</summary>
+    [JsonPropertyName("validFrom")] public string? ValidFrom { get; init; }
+    /// <summary>NotAfter (ISO 8601).</summary>
+    [JsonPropertyName("validTo")] public string? ValidTo { get; init; }
+    /// <summary>Certificate signature algorithm.</summary>
+    [JsonPropertyName("signatureAlgorithm")] public string? SignatureAlgorithm { get; init; }
+    /// <summary>Public-key algorithm.</summary>
+    [JsonPropertyName("publicKeyAlgorithm")] public string? PublicKeyAlgorithm { get; init; }
+    /// <summary>Public-key size in bits.</summary>
+    [JsonPropertyName("keySize")] public int? KeySize { get; init; }
+    /// <summary>Days remaining before the certificate expires.</summary>
+    [JsonPropertyName("daysUntilExpiry")] public int? DaysUntilExpiry { get; init; }
+}
+
+/// <summary>TLS handshake details captured during a URL scan.</summary>
+public sealed class TlsInfo
+{
+    /// <summary>Negotiated TLS version (e.g. TLS 1.3).</summary>
+    [JsonPropertyName("version")] public string? Version { get; init; }
+    /// <summary>Negotiated cipher suite.</summary>
+    [JsonPropertyName("cipherSuite")] public string? CipherSuite { get; init; }
+    /// <summary>Key-exchange group / algorithm.</summary>
+    [JsonPropertyName("keyExchange")] public string? KeyExchange { get; init; }
+    /// <summary>True if a post-quantum hybrid key exchange was negotiated.</summary>
+    [JsonPropertyName("pqHybrid")] public bool? PqHybrid { get; init; }
+}
+
+/// <summary>A normalized finding row attached to a <see cref="ScanDetail"/>.</summary>
+public sealed class ScanFindingRow
+{
+    /// <summary>Severity bucket (CRITICAL | HIGH | MEDIUM | LOW | INFO).</summary>
+    [JsonPropertyName("severity")] public required string Severity { get; init; }
+    /// <summary>Finding title.</summary>
+    [JsonPropertyName("title")] public required string Title { get; init; }
+    /// <summary>Long description.</summary>
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    /// <summary>Where the finding was observed (file path, URL, etc.).</summary>
+    [JsonPropertyName("location")] public string? Location { get; init; }
+    /// <summary>Detected cryptographic algorithm, if applicable.</summary>
+    [JsonPropertyName("algorithm")] public string? Algorithm { get; init; }
+    /// <summary>Suggested remediation.</summary>
+    [JsonPropertyName("remediation")] public string? Remediation { get; init; }
+    /// <summary>True if the finding is exploitable / actionable.</summary>
+    [JsonPropertyName("vulnerable")] public bool? Vulnerable { get; init; }
+    /// <summary>Free-form metadata payload.</summary>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+}
+
+/// <summary>Full scan record returned by <see cref="ScansResource.GetAsync"/>.</summary>
+public sealed class ScanDetail
+{
+    /// <summary>Scan ID.</summary>
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    /// <summary>Scan type (url | repo | kubernetes | aws-kms | ...).</summary>
+    [JsonPropertyName("type")] public required string Type { get; init; }
+    /// <summary>Scan target (URL, repo slug, cluster name, etc.).</summary>
+    [JsonPropertyName("target")] public required string Target { get; init; }
+    /// <summary>Source channel (cli | helm | dashboard | api).</summary>
+    [JsonPropertyName("source")] public string? Source { get; init; }
+    /// <summary>Aggregated risk score (0–100).</summary>
+    [JsonPropertyName("riskScore")] public int RiskScore { get; init; }
+    /// <summary>Aggregated risk level.</summary>
+    [JsonPropertyName("riskLevel")] public string? RiskLevel { get; init; }
+    /// <summary>Total number of findings attached to this scan.</summary>
+    [JsonPropertyName("findingsCount")] public int FindingsCount { get; init; }
+    /// <summary>Scan mode (e.g. quick | deep).</summary>
+    [JsonPropertyName("mode")] public string? Mode { get; init; }
+    /// <summary>ISO 8601 timestamp.</summary>
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    /// <summary>Direct dashboard URL for the scan.</summary>
+    [JsonPropertyName("url")] public string? Url { get; init; }
+    /// <summary>Agent metadata reported at submission time.</summary>
+    [JsonPropertyName("agent")] public System.Text.Json.JsonElement Agent { get; init; }
+    /// <summary>Normalized finding rows for this scan.</summary>
+    [JsonPropertyName("findings")] public IReadOnlyList<ScanFindingRow> Findings { get; init; } = Array.Empty<ScanFindingRow>();
+    /// <summary>Harvest-now-decrypt-later assessment, if computed.</summary>
+    [JsonPropertyName("hndl")] public HndlAssessment? Hndl { get; init; }
+    /// <summary>Certificate details for URL scans.</summary>
+    [JsonPropertyName("certificate")] public CertificateInfo? Certificate { get; init; }
+    /// <summary>TLS handshake details for URL scans.</summary>
+    [JsonPropertyName("tls")] public TlsInfo? Tls { get; init; }
+    /// <summary>Scanner-specific summary blob.</summary>
+    [JsonPropertyName("summary")] public System.Text.Json.JsonElement Summary { get; init; }
+    /// <summary>Free-form scan metadata.</summary>
+    [JsonPropertyName("metadata")] public System.Text.Json.JsonElement Metadata { get; init; }
+    /// <summary>Relative URL to the CycloneDX CBOM document for this scan.</summary>
+    [JsonPropertyName("cbomUrl")] public string? CbomUrl { get; init; }
+}
+
 // ── internal envelope shapes (not exported) ──────────────────────────────────
 
 internal sealed class ApiEnvelope<T>

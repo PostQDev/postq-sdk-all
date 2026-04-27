@@ -276,6 +276,28 @@ public sealed class ScansResource
             cursor = page.Pagination.NextCursor;
         }
     }
+
+    /// <summary><c>GET /v1/scans/{id}</c> — full scan record including HNDL, certificate, TLS, and findings.</summary>
+    public async Task<ScanDetail> GetAsync(string scanId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(scanId)) throw new ArgumentException("scanId is required", nameof(scanId));
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<ScanDetail>>(HttpMethod.Get, $"/v1/scans/{Uri.EscapeDataString(scanId)}", null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException($"API returned no data for GET /v1/scans/{scanId}");
+        }
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/scans/{id}/cbom</c> — CycloneDX 1.6 CBOM document for the scan.</summary>
+    public Task<System.Text.Json.JsonElement> GetCbomAsync(string scanId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(scanId)) throw new ArgumentException("scanId is required", nameof(scanId));
+        return _client.SendAsync<System.Text.Json.JsonElement>(
+            HttpMethod.Get, $"/v1/scans/{Uri.EscapeDataString(scanId)}/cbom", null, null, ct);
+    }
 }
 
 /// <summary>Operations under <c>/v1/assets</c>.</summary>

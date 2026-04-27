@@ -91,6 +91,106 @@ export interface ScanListResult {
   pagination: Pagination;
 }
 
+/* ────────────────────────────── Scan detail ────────────────────────────── */
+
+/** HNDL severity bands surfaced on URL scans. */
+export type HndlSeverity = "critical" | "high" | "medium" | "low" | "none";
+
+/** Harvest-Now-Decrypt-Later exposure for a single scan. */
+export interface HndlAssessment {
+  /** 0–100 risk number; 100 = data captured today is fully decryptable while still sensitive. */
+  score: number;
+  severity: HndlSeverity;
+  /** Years of overlap between "data still sensitive" and "CRQC available". */
+  exposureWindowYears: number;
+  /** Estimated year a CRQC breaks the underlying algorithm. 9999 = PQ-safe. */
+  crqcBreakYear: number;
+  /** Years the protected data is assumed to remain sensitive. */
+  dataLifetimeYears: number;
+  /** True when exposure is essentially zero. */
+  pqSafe: boolean;
+  rationale: string;
+  recommendation: string;
+}
+
+/** Certificate metadata captured during URL scans. */
+export interface CertificateInfo {
+  subject: string;
+  issuer: string;
+  serialNumber: string;
+  validFrom: string;
+  validTo: string;
+  signatureAlgorithm: string;
+  publicKeyAlgorithm: string;
+  publicKeySize: number;
+  fingerprint: string;
+  subjectAltNames: string[];
+  isExpired: boolean;
+  daysUntilExpiry: number;
+}
+
+/** TLS handshake metadata captured during URL scans. */
+export interface TlsInfo {
+  protocol: string;
+  cipherSuite: string;
+  keyExchange: string;
+  keyExchangeSize?: number;
+  authentication: string;
+  encryption: string;
+  mac: string;
+}
+
+/** A normalized finding row stored alongside a scan (CLI/agent submissions). */
+export interface ScanFindingRow {
+  id?: string;
+  severity: Severity;
+  title: string;
+  description?: string;
+  location?: string;
+  algorithm?: string | null;
+  remediation?: string;
+  vulnerable?: boolean;
+}
+
+/** Aggregated counts surfaced on URL scans. */
+export interface ScanSummary {
+  totalEndpoints?: number;
+  quantumVulnerable?: number;
+  hybridEnabled?: number;
+  pqReady?: number;
+  /** CLI/agent submissions also include severity-bucketed counts. */
+  critical?: number;
+  high?: number;
+  medium?: number;
+  low?: number;
+  info?: number;
+}
+
+/** Full scan record returned by `scans.get(id)`. Fields hndl/certificate/tls
+ *  are populated for URL scans run from the dashboard, and may be null for
+ *  CLI/agent submissions that only carry findings + metadata. */
+export interface ScanDetail {
+  id: string;
+  type: ScanType;
+  target: string;
+  source: ScanSource;
+  riskScore: number;
+  riskLevel: RiskLevel;
+  findingsCount: number;
+  mode: "live" | "mock";
+  createdAt: string;
+  url: string;
+  agent: AgentInfo;
+  findings: ScanFindingRow[];
+  hndl: HndlAssessment | null;
+  certificate: CertificateInfo | null;
+  tls: TlsInfo | null;
+  summary: ScanSummary | null;
+  metadata: Record<string, string> | null;
+  /** Relative URL to the CycloneDX 1.6 CBOM export for this scan. */
+  cbomUrl: string;
+}
+
 /** Health-check response. */
 export interface HealthResult {
   status: string;

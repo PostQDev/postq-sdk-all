@@ -29,6 +29,7 @@ from .models import (
     HybridSignResult,
     HybridVerifyResult,
     Key,
+    ScanDetail,
     ScanListItem,
     ScanSubmitResult,
 )
@@ -232,6 +233,18 @@ class ScansResource:
             params["cursor"] = cursor
         body = self._client._request("GET", "/v1/scans", params=params)
         return [_row_to_item(row) for row in body["data"]]
+
+    def get(self, scan_id: str) -> ScanDetail:
+        """``GET /v1/scans/:id`` — full scan record including HNDL,
+        certificate, TLS, and findings when populated."""
+        body = self._client._request("GET", f"/v1/scans/{scan_id}")
+        return ScanDetail.from_api(body["data"])
+
+    def cbom(self, scan_id: str) -> "dict[str, Any]":
+        """``GET /v1/scans/:id/cbom`` — CycloneDX 1.6 CBOM as a parsed dict."""
+        body = self._client._request("GET", f"/v1/scans/{scan_id}/cbom")
+        # CBOM endpoint returns the CBOM document directly (no envelope).
+        return body or {}
 
     def iter_all(self, *, page_size: int = 100) -> Iterator[ScanListItem]:
         """Generator that walks every scan via cursor pagination."""

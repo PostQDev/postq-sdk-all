@@ -14,6 +14,7 @@ import {
   ScanListResult,
   ScanSubmitInput,
   ScanSubmitResult,
+  ScanDetail,
   Asset,
   AssetListOptions,
   AssetListResult,
@@ -187,6 +188,58 @@ export class PostQ {
 
     return (json ?? {}) as T;
   }
+
+  /** @internal Same as `request` but returns the raw response body as text
+   *  without any JSON parsing or envelope handling. Used for endpoints that
+   *  return non-JSON-envelope payloads (e.g. CBOM exports). */
+  async requestRaw(
+    method: "GET" | "POST" | "DELETE",
+    path: string,
+    opts: { query?: Record<string, string | number | boolean | undefined> } = {},
+  ): Promise<string> {
+    const url = new URL(this.baseUrl + path);
+    if (opts.query) {
+      for (const [k, v] of Object.entries(opts.query)) {
+        if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+      }
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url.toString(), {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          Accept: "*/*",
+          "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
+        },
+        signal: controller.signal,
+      });
+    } catch (err) {
+      const e = err as { name?: string; message?: string };
+      if (e.name === "AbortError") {
+        throw new PostQNetworkError(`${method} ${path} timed out after ${this.timeoutMs}ms`);
+      }
+      throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = await response.text();
+    if (!response.ok) {
+      const message = text ? text.slice(0, 500) : `HTTP ${response.status}`;
+      switch (response.status) {
+        case 401: throw new PostQAuthError(message);
+        case 404: throw new PostQError(message, { status: 404 });
+        default:
+          if (response.status >= 500) {
+            throw new PostQServerError(message, response.status);
+          }
+          throw new PostQError(message, { status: response.status });
+      }
+    }
+    return text;
+  }
 }
 
 /**
@@ -224,6 +277,29 @@ export class ScansResource {
       query: { limit: opts.limit ?? 20, cursor: opts.cursor },
     });
     return { data: envelope.data, pagination: envelope.pagination };
+  }
+
+  /** `GET /v1/scans/:id` — full scan record including hndl/certificate/tls
+   *  when populated by URL scans. */
+  async get(id: string): Promise<ScanDetail> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: ScanDetail;
+    }>("GET", `/v1/scans/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  /** `GET /v1/scans/:id/cbom` — CycloneDX 1.6 CBOM as a parsed object.
+   *  Pass `{ raw: true }` to receive the JSON string instead. */
+  async cbom(id: string): Promise<unknown>;
+  async cbom(id: string, opts: { raw: true }): Promise<string>;
+  async cbom(id: string, opts?: { raw?: boolean }): Promise<unknown> {
+    const text = await this.client.requestRaw(
+      "GET",
+      `/v1/scans/${encodeURIComponent(id)}/cbom`,
+    );
+    if (opts?.raw) return text;
+    return JSON.parse(text);
   }
 
   /** Async iterator over every scan, walking the cursor automatically. */

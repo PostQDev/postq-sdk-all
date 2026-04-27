@@ -36,15 +36,20 @@ from .errors import (
 )
 from .models import (
     Asset,
+    CertificateInfo,
     Finding,
+    HndlAssessment,
     HybridAlgorithm,
     HybridKey,
     HybridKeyWithPublic,
     HybridSignResult,
     HybridVerifyResult,
     Key,
+    ScanDetail,
+    ScanFindingRow,
     ScanListItem,
     ScanSubmitResult,
+    TlsInfo,
 )
 
 __all__ = [
@@ -63,7 +68,12 @@ __all__ = [
     "PostQNetworkError",
     "Finding",
     "ScanListItem",
+    "ScanDetail",
+    "ScanFindingRow",
     "ScanSubmitResult",
+    "HndlAssessment",
+    "CertificateInfo",
+    "TlsInfo",
     "Asset",
     "Key",
     "HybridAlgorithm",

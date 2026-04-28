@@ -22,9 +22,18 @@ Example::
 """
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
-from .client import AssetsResource, HybridKeysResource, KeysResource, PostQ, ScansResource
+from .client import (
+    AssetsResource,
+    HybridKeysResource,
+    KeysResource,
+    LedgerResource,
+    PoliciesResource,
+    PostQ,
+    ScansResource,
+    VaultResource,
+)
 from .errors import (
     PostQAuthError,
     PostQConfigError,
@@ -41,15 +50,26 @@ from .models import (
     HndlAssessment,
     HybridAlgorithm,
     HybridKey,
+    HybridKeyAuditEntry,
     HybridKeyWithPublic,
     HybridSignResult,
     HybridVerifyResult,
     Key,
+    LedgerBundle,
+    LedgerCheckpoint,
+    LedgerEntry,
+    LedgerInclusionProof,
+    LedgerSealResult,
+    Policy,
+    PolicyAction,
+    PolicyOperation,
+    PolicyRule,
     ScanDetail,
     ScanFindingRow,
     ScanListItem,
     ScanSubmitResult,
     TlsInfo,
+    VaultSettings,
 )
 
 __all__ = [
@@ -59,6 +79,9 @@ __all__ = [
     "AssetsResource",
     "KeysResource",
     "HybridKeysResource",
+    "PoliciesResource",
+    "LedgerResource",
+    "VaultResource",
     "PostQError",
     "PostQConfigError",
     "PostQAuthError",
@@ -79,6 +102,17 @@ __all__ = [
     "HybridAlgorithm",
     "HybridKey",
     "HybridKeyWithPublic",
+    "HybridKeyAuditEntry",
     "HybridSignResult",
     "HybridVerifyResult",
+    "Policy",
+    "PolicyAction",
+    "PolicyOperation",
+    "PolicyRule",
+    "LedgerEntry",
+    "LedgerCheckpoint",
+    "LedgerInclusionProof",
+    "LedgerSealResult",
+    "LedgerBundle",
+    "VaultSettings",
 ]

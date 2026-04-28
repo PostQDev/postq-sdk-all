@@ -300,3 +300,132 @@ class HybridVerifyResult:
     algorithm: HybridAlgorithm
     classical_ok: bool
     pq_ok: bool
+
+
+# ─────────────────────────── Hybrid key audit ───────────────────────────
+
+
+@dataclass
+class HybridKeyAuditEntry:
+    """A single ledger entry surfaced by ``GET /v1/hybrid-keys/:id/audit``."""
+
+    id: str
+    seq: int
+    event_type: str
+    created_at: str
+    actor: Optional[str] = None
+    subject_id: Optional[str] = None
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
+# ─────────────────────────── Policies ───────────────────────────
+
+PolicyAction = str  # "allow" | "deny" | "require_approval"
+PolicyOperation = str  # "sign" | "verify" | "create_key" | "revoke_key" | "rotate_key"
+
+
+@dataclass
+class PolicyRule:
+    """The typed rule body of a policy. ``operations`` and ``action`` are
+    required; the remaining fields are optional constraints."""
+
+    operations: list = field(default_factory=list)
+    action: PolicyAction = "deny"
+    algorithms: Optional[list] = None
+    key_ids: Optional[list] = None
+    max_payload_bytes: Optional[int] = None
+    require_metadata_keys: Optional[list] = None
+    message: Optional[str] = None
+
+
+@dataclass
+class Policy:
+    """An org-level policy rule enforced by ``POST /v1/sign``."""
+
+    id: str
+    name: str
+    enabled: bool
+    rule: PolicyRule
+    created_at: str
+    updated_at: str
+    description: Optional[str] = None
+
+
+# ─────────────────────────── Ledger ───────────────────────────
+
+
+@dataclass
+class LedgerEntry:
+    """An entry in the org's tamper-evident hash chain."""
+
+    id: str
+    seq: int
+    event_type: str
+    created_at: str
+    prev_hash: str
+    leaf_hash: str
+    actor: Optional[str] = None
+    subject_id: Optional[str] = None
+    data: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class LedgerCheckpoint:
+    """A signed Merkle-root checkpoint over a range of ledger entries."""
+
+    id: str
+    seq: int
+    merkle_root: str
+    entries_count: int
+    signed_at: str
+    signing_key_id: str
+    signature: str
+    algorithm: Optional[str] = None
+
+
+@dataclass
+class LedgerInclusionProof:
+    """A Merkle inclusion proof for a single ledger entry."""
+
+    entry_id: str
+    seq: int
+    leaf_hash: str
+    merkle_path: list
+    checkpoint: LedgerCheckpoint
+
+
+@dataclass
+class LedgerSealResult:
+    """Returned by ``POST /v1/ledger/seal``."""
+
+    checkpoint: Optional[LedgerCheckpoint]
+    sealed: bool
+    entries_covered: int
+
+
+@dataclass
+class LedgerBundle:
+    """A verifiable bundle returned by ``GET /v1/ledger/bundle``."""
+
+    version: str
+    org: Dict[str, Any]
+    generated_at: str
+    entries: list
+    checkpoints: list
+    signing_keys: list
+
+
+# ─────────────────────────── Vault ───────────────────────────
+
+
+@dataclass
+class VaultSettings:
+    """Per-org BYOK / KMS settings returned by ``GET /v1/vault/settings``.
+
+    The encrypted secret is never returned in plaintext."""
+
+    kek_provider: str  # "env" | "aws-kms" | "azure-kv"
+    aws: Optional[Dict[str, Any]] = None
+    azure: Optional[Dict[str, Any]] = None
+    configured_at: Optional[str] = None
+    updated_at: Optional[str] = None

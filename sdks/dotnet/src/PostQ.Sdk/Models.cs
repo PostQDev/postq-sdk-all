@@ -503,3 +503,173 @@ public sealed class HybridVerifyResult
     /// <summary>Whether the ML-DSA half verified.</summary>
     [JsonPropertyName("pqOk")] public bool PqOk { get; init; }
 }
+
+// ─────────────────────────── Hybrid key audit ───────────────────────────
+
+/// <summary>A single ledger entry surfaced by <c>GET /v1/hybrid-keys/:id/audit</c>.</summary>
+public sealed class HybridKeyAuditEntry
+{
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    [JsonPropertyName("seq")] public required long Seq { get; init; }
+    [JsonPropertyName("eventType")] public required string EventType { get; init; }
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    [JsonPropertyName("actor")] public string? Actor { get; init; }
+    [JsonPropertyName("subjectId")] public string? SubjectId { get; init; }
+    [JsonPropertyName("data")] public Dictionary<string, object?>? Data { get; init; }
+}
+
+/// <summary>Response from <see cref="HybridKeysResource.GetAuditAsync"/>.</summary>
+public sealed class HybridKeyAuditResult
+{
+    public required IReadOnlyList<HybridKeyAuditEntry> Data { get; init; }
+    public required Pagination Pagination { get; init; }
+}
+
+// ─────────────────────────── Policies ───────────────────────────
+
+/// <summary>The typed rule body of a policy.</summary>
+public sealed class PolicyRule
+{
+    /// <summary>One or more of: sign | verify | create_key | revoke_key | rotate_key.</summary>
+    [JsonPropertyName("operations")] public required IReadOnlyList<string> Operations { get; init; }
+    /// <summary>allow | deny | require_approval.</summary>
+    [JsonPropertyName("action")] public required string Action { get; init; }
+    [JsonPropertyName("algorithms")] public IReadOnlyList<string>? Algorithms { get; init; }
+    [JsonPropertyName("keyIds")] public IReadOnlyList<string>? KeyIds { get; init; }
+    [JsonPropertyName("maxPayloadBytes")] public long? MaxPayloadBytes { get; init; }
+    [JsonPropertyName("requireMetadataKeys")] public IReadOnlyList<string>? RequireMetadataKeys { get; init; }
+    [JsonPropertyName("message")] public string? Message { get; init; }
+}
+
+/// <summary>An org-level policy rule enforced by <c>POST /v1/sign</c>.</summary>
+public sealed class Policy
+{
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("enabled")] public required bool Enabled { get; init; }
+    [JsonPropertyName("rule")] public required PolicyRule Rule { get; init; }
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    [JsonPropertyName("updatedAt")] public required string UpdatedAt { get; init; }
+}
+
+/// <summary>Input for <see cref="PoliciesResource.CreateAsync"/>.</summary>
+public sealed class PolicyCreateInput
+{
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("enabled")] public bool Enabled { get; init; } = true;
+    [JsonPropertyName("rule")] public required PolicyRule Rule { get; init; }
+}
+
+/// <summary>Input for <see cref="PoliciesResource.UpdateAsync"/>. All fields optional.</summary>
+public sealed class PolicyUpdateInput
+{
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("enabled")] public bool? Enabled { get; init; }
+    [JsonPropertyName("rule")] public PolicyRule? Rule { get; init; }
+}
+
+// ─────────────────────────── Ledger ───────────────────────────
+
+/// <summary>An entry in the org's tamper-evident hash chain.</summary>
+public sealed class LedgerEntry
+{
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    [JsonPropertyName("seq")] public required long Seq { get; init; }
+    [JsonPropertyName("eventType")] public required string EventType { get; init; }
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    [JsonPropertyName("prevHash")] public string? PrevHash { get; init; }
+    [JsonPropertyName("leafHash")] public string? LeafHash { get; init; }
+    [JsonPropertyName("actor")] public string? Actor { get; init; }
+    [JsonPropertyName("subjectId")] public string? SubjectId { get; init; }
+    [JsonPropertyName("data")] public Dictionary<string, object?>? Data { get; init; }
+}
+
+/// <summary>A signed Merkle-root checkpoint over a range of ledger entries.</summary>
+public sealed class LedgerCheckpoint
+{
+    [JsonPropertyName("id")] public required string Id { get; init; }
+    [JsonPropertyName("seq")] public required long Seq { get; init; }
+    [JsonPropertyName("merkleRoot")] public required string MerkleRoot { get; init; }
+    [JsonPropertyName("entriesCount")] public long EntriesCount { get; init; }
+    [JsonPropertyName("signedAt")] public required string SignedAt { get; init; }
+    [JsonPropertyName("signingKeyId")] public string? SigningKeyId { get; init; }
+    [JsonPropertyName("signature")] public string? Signature { get; init; }
+    [JsonPropertyName("algorithm")] public string? Algorithm { get; init; }
+}
+
+/// <summary>A Merkle inclusion proof for a single ledger entry.</summary>
+public sealed class LedgerInclusionProof
+{
+    [JsonPropertyName("entryId")] public required string EntryId { get; init; }
+    [JsonPropertyName("seq")] public required long Seq { get; init; }
+    [JsonPropertyName("leafHash")] public required string LeafHash { get; init; }
+    [JsonPropertyName("merklePath")] public required IReadOnlyList<string> MerklePath { get; init; }
+    [JsonPropertyName("checkpoint")] public required LedgerCheckpoint Checkpoint { get; init; }
+}
+
+/// <summary>Returned by <see cref="LedgerResource.SealAsync"/>.</summary>
+public sealed class LedgerSealResult
+{
+    [JsonPropertyName("checkpoint")] public LedgerCheckpoint? Checkpoint { get; init; }
+    [JsonPropertyName("sealed")] public bool Sealed { get; init; }
+    [JsonPropertyName("entriesCovered")] public long EntriesCovered { get; init; }
+}
+
+/// <summary>Input for <see cref="LedgerResource.AppendAsync"/>.</summary>
+public sealed class LedgerAppendInput
+{
+    [JsonPropertyName("name")] public required string Name { get; init; }
+    [JsonPropertyName("message")] public string? Message { get; init; }
+    [JsonPropertyName("subjectId")] public string? SubjectId { get; init; }
+    [JsonPropertyName("data")] public Dictionary<string, object?>? Data { get; init; }
+}
+
+/// <summary>A verifiable bundle returned by <see cref="LedgerResource.BundleAsync"/>.</summary>
+public sealed class LedgerBundle
+{
+    [JsonPropertyName("version")] public required string Version { get; init; }
+    [JsonPropertyName("org")] public Dictionary<string, object?>? Org { get; init; }
+    [JsonPropertyName("generatedAt")] public required string GeneratedAt { get; init; }
+    [JsonPropertyName("entries")] public required IReadOnlyList<LedgerEntry> Entries { get; init; }
+    [JsonPropertyName("checkpoints")] public required IReadOnlyList<LedgerCheckpoint> Checkpoints { get; init; }
+    [JsonPropertyName("signingKeys")] public IReadOnlyList<Dictionary<string, object?>>? SigningKeys { get; init; }
+}
+
+/// <summary>Response from <see cref="LedgerResource.EntriesAsync"/>.</summary>
+public sealed class LedgerEntryListResult
+{
+    public required IReadOnlyList<LedgerEntry> Data { get; init; }
+    public required Pagination Pagination { get; init; }
+}
+
+/// <summary>Response from <see cref="LedgerResource.CheckpointsAsync"/>.</summary>
+public sealed class LedgerCheckpointListResult
+{
+    public required IReadOnlyList<LedgerCheckpoint> Data { get; init; }
+    public required Pagination Pagination { get; init; }
+}
+
+// ─────────────────────────── Vault ───────────────────────────
+
+/// <summary>Per-org BYOK / KMS settings returned by <c>GET /v1/vault/settings</c>.
+/// The encrypted secret is never returned in plaintext.</summary>
+public sealed class VaultSettings
+{
+    /// <summary>env | aws-kms | azure-kv.</summary>
+    [JsonPropertyName("kekProvider")] public required string KekProvider { get; init; }
+    [JsonPropertyName("aws")] public Dictionary<string, object?>? Aws { get; init; }
+    [JsonPropertyName("azure")] public Dictionary<string, object?>? Azure { get; init; }
+    [JsonPropertyName("configuredAt")] public string? ConfiguredAt { get; init; }
+    [JsonPropertyName("updatedAt")] public string? UpdatedAt { get; init; }
+}
+
+/// <summary>Input for <see cref="VaultResource.PutSettingsAsync"/>.</summary>
+public sealed class VaultSettingsInput
+{
+    [JsonPropertyName("kekProvider")] public required string KekProvider { get; init; }
+    [JsonPropertyName("aws")] public Dictionary<string, object?>? Aws { get; init; }
+    [JsonPropertyName("azure")] public Dictionary<string, object?>? Azure { get; init; }
+}

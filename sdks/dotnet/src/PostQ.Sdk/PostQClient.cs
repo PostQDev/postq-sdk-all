@@ -54,6 +54,15 @@ public sealed class PostQClient : IDisposable
     /// <summary>Operations under <c>/v1/hybrid-keys</c>, <c>/v1/sign</c>, and <c>/v1/verify</c>.</summary>
     public HybridKeysResource HybridKeys { get; }
 
+    /// <summary>Operations under <c>/v1/policies</c>.</summary>
+    public PoliciesResource Policies { get; }
+
+    /// <summary>Operations under <c>/v1/ledger</c>.</summary>
+    public LedgerResource Ledger { get; }
+
+    /// <summary>Operations under <c>/v1/vault</c>.</summary>
+    public VaultResource Vault { get; }
+
     /// <summary>Construct a new client.</summary>
     /// <param name="options">Required configuration. Must include an API key.</param>
     /// <param name="httpClient">
@@ -82,6 +91,9 @@ public sealed class PostQClient : IDisposable
         Assets = new AssetsResource(this);
         Keys = new KeysResource(this);
         HybridKeys = new HybridKeysResource(this);
+        Policies = new PoliciesResource(this);
+        Ledger = new LedgerResource(this);
+        Vault = new VaultResource(this);
     }
 
     /// <summary>Hit <c>GET /health</c>. Throws if the API is down.</summary>
@@ -498,6 +510,51 @@ public sealed class HybridKeysResource
             .ConfigureAwait(false);
     }
 
+    /// <summary><c>POST /v1/hybrid-keys/:id/rotate</c> — generate a new keypair under the same logical key.</summary>
+    public async Task<HybridKeyWithPublic> RotateAsync(
+        string keyId,
+        string? name = null,
+        CancellationToken ct = default)
+    {
+        var body = new { name };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<HybridKeyWithPublic>>(
+                HttpMethod.Post,
+                $"/v1/hybrid-keys/{Uri.EscapeDataString(keyId)}/rotate",
+                body, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null)
+        {
+            throw new PostQException($"API returned no data for POST /v1/hybrid-keys/{keyId}/rotate");
+        }
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/hybrid-keys/:id/audit</c> — recent ledger entries for this key.</summary>
+    public async Task<HybridKeyAuditResult> GetAuditAsync(
+        string keyId,
+        int? limit = null,
+        string? cursor = null,
+        CancellationToken ct = default)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = limit?.ToString(),
+            ["cursor"] = cursor,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<HybridKeyAuditEntry>>>(
+                HttpMethod.Get,
+                $"/v1/hybrid-keys/{Uri.EscapeDataString(keyId)}/audit",
+                null, query, ct)
+            .ConfigureAwait(false);
+        return new HybridKeyAuditResult
+        {
+            Data = envelope?.Data ?? new List<HybridKeyAuditEntry>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = limit ?? 20 },
+        };
+    }
+
     /// <summary><c>POST /v1/sign</c> — sign <paramref name="input"/>.Payload with the named hybrid key.</summary>
     public async Task<HybridSignResult> SignAsync(
         HybridSignInput input,
@@ -545,5 +602,225 @@ public sealed class HybridKeysResource
             throw new PostQException("API returned no data for POST /v1/verify");
         }
         return envelope.Data;
+    }
+}
+
+/// <summary>Operations under <c>/v1/policies</c> — org-level policy rules
+/// enforced by <c>POST /v1/sign</c>.</summary>
+public sealed class PoliciesResource
+{
+    private readonly PostQClient _client;
+
+    internal PoliciesResource(PostQClient client) => _client = client;
+
+    /// <summary><c>GET /v1/policies</c> — all policies for the org (seeds defaults on first call).</summary>
+    public async Task<List<Policy>> ListAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<Policy>>>(HttpMethod.Get, "/v1/policies", null, null, ct)
+            .ConfigureAwait(false);
+        return envelope?.Data ?? new List<Policy>();
+    }
+
+    /// <summary><c>GET /v1/policies/:id</c>.</summary>
+    public async Task<Policy> GetAsync(string policyId, CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<Policy>>(
+                HttpMethod.Get, $"/v1/policies/{Uri.EscapeDataString(policyId)}", null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQNotFoundException("Policy not found", null);
+        return envelope.Data;
+    }
+
+    /// <summary><c>POST /v1/policies</c> — create a new policy.</summary>
+    public async Task<Policy> CreateAsync(PolicyCreateInput input, CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<Policy>>(HttpMethod.Post, "/v1/policies", input, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException("API returned no data for POST /v1/policies");
+        return envelope.Data;
+    }
+
+    /// <summary><c>PATCH /v1/policies/:id</c> — update a policy.</summary>
+    public async Task<Policy> UpdateAsync(
+        string policyId,
+        PolicyUpdateInput input,
+        CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<Policy>>(
+                HttpMethod.Patch,
+                $"/v1/policies/{Uri.EscapeDataString(policyId)}",
+                input, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException($"API returned no data for PATCH /v1/policies/{policyId}");
+        return envelope.Data;
+    }
+
+    /// <summary><c>DELETE /v1/policies/:id</c>.</summary>
+    public async Task DeleteAsync(string policyId, CancellationToken ct = default)
+    {
+        await _client
+            .SendAsync<ApiEnvelope<JsonElement>>(
+                HttpMethod.Delete,
+                $"/v1/policies/{Uri.EscapeDataString(policyId)}",
+                null, null, ct)
+            .ConfigureAwait(false);
+    }
+}
+
+/// <summary>Operations under <c>/v1/ledger</c> — read the tamper-evident hash
+/// chain of signing events, fetch checkpoints / inclusion proofs, and
+/// download verifiable bundles.</summary>
+public sealed class LedgerResource
+{
+    private readonly PostQClient _client;
+
+    internal LedgerResource(PostQClient client) => _client = client;
+
+    /// <summary><c>GET /v1/ledger/entries</c>.</summary>
+    public async Task<LedgerEntryListResult> EntriesAsync(
+        long? since = null,
+        int? limit = null,
+        string? eventType = null,
+        CancellationToken ct = default)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["since"] = since?.ToString(),
+            ["limit"] = limit?.ToString(),
+            ["eventType"] = eventType,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<LedgerEntry>>>(
+                HttpMethod.Get, "/v1/ledger/entries", null, query, ct)
+            .ConfigureAwait(false);
+        return new LedgerEntryListResult
+        {
+            Data = envelope?.Data ?? new List<LedgerEntry>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = limit ?? 50 },
+        };
+    }
+
+    /// <summary><c>POST /v1/ledger/entries</c> — append a custom entry to the org ledger.</summary>
+    public async Task<LedgerEntry> AppendAsync(LedgerAppendInput input, CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<LedgerEntry>>(
+                HttpMethod.Post, "/v1/ledger/entries", input, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException("API returned no data for POST /v1/ledger/entries");
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/ledger/checkpoints</c>.</summary>
+    public async Task<LedgerCheckpointListResult> CheckpointsAsync(
+        int? limit = null,
+        string? cursor = null,
+        CancellationToken ct = default)
+    {
+        var query = new Dictionary<string, string?>
+        {
+            ["limit"] = limit?.ToString(),
+            ["cursor"] = cursor,
+        };
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<List<LedgerCheckpoint>>>(
+                HttpMethod.Get, "/v1/ledger/checkpoints", null, query, ct)
+            .ConfigureAwait(false);
+        return new LedgerCheckpointListResult
+        {
+            Data = envelope?.Data ?? new List<LedgerCheckpoint>(),
+            Pagination = envelope?.Pagination ?? new Pagination { Limit = limit ?? 20 },
+        };
+    }
+
+    /// <summary><c>GET /v1/ledger/checkpoints/latest</c>. Returns null if not sealed yet.</summary>
+    public async Task<LedgerCheckpoint?> LatestCheckpointAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<LedgerCheckpoint?>>(
+                HttpMethod.Get, "/v1/ledger/checkpoints/latest", null, null, ct)
+            .ConfigureAwait(false);
+        return envelope?.Data;
+    }
+
+    /// <summary><c>POST /v1/ledger/seal</c> — force a new checkpoint.</summary>
+    public async Task<LedgerSealResult> SealAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<LedgerSealResult>>(
+                HttpMethod.Post, "/v1/ledger/seal", null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException("API returned no data for POST /v1/ledger/seal");
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/ledger/proof/:entryId</c> — Merkle inclusion proof
+    /// (auto-seals if no checkpoint covers the entry yet).</summary>
+    public async Task<LedgerInclusionProof> ProofAsync(string entryId, CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<LedgerInclusionProof>>(
+                HttpMethod.Get,
+                $"/v1/ledger/proof/{Uri.EscapeDataString(entryId)}",
+                null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException($"API returned no data for GET /v1/ledger/proof/{entryId}");
+        return envelope.Data;
+    }
+
+    /// <summary><c>GET /v1/ledger/bundle</c> — full verifiable bundle.</summary>
+    public async Task<LedgerBundle> BundleAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<LedgerBundle>>(
+                HttpMethod.Get, "/v1/ledger/bundle", null, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException("API returned no data for GET /v1/ledger/bundle");
+        return envelope.Data;
+    }
+}
+
+/// <summary>Operations under <c>/v1/vault</c> — manage per-org KMS settings
+/// (BYOK). The encrypted secret is never returned in plaintext.</summary>
+public sealed class VaultResource
+{
+    private readonly PostQClient _client;
+
+    internal VaultResource(PostQClient client) => _client = client;
+
+    /// <summary><c>GET /v1/vault/settings</c> — current settings, or null.</summary>
+    public async Task<VaultSettings?> GetSettingsAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<VaultSettings?>>(
+                HttpMethod.Get, "/v1/vault/settings", null, null, ct)
+            .ConfigureAwait(false);
+        return envelope?.Data;
+    }
+
+    /// <summary><c>PUT /v1/vault/settings</c> — set or update KMS settings.</summary>
+    public async Task<VaultSettings> PutSettingsAsync(
+        VaultSettingsInput input,
+        CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<VaultSettings>>(
+                HttpMethod.Put, "/v1/vault/settings", input, null, ct)
+            .ConfigureAwait(false);
+        if (envelope?.Data is null) throw new PostQException("API returned no data for PUT /v1/vault/settings");
+        return envelope.Data;
+    }
+
+    /// <summary><c>DELETE /v1/vault/settings</c>.</summary>
+    public async Task ClearSettingsAsync(CancellationToken ct = default)
+    {
+        await _client
+            .SendAsync<ApiEnvelope<JsonElement>>(
+                HttpMethod.Delete, "/v1/vault/settings", null, null, ct)
+            .ConfigureAwait(false);
     }
 }

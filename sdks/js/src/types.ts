@@ -300,7 +300,19 @@ export interface KeyListResult {
 export type HybridAlgorithm =
   | "mldsa44+ed25519"
   | "mldsa65+ed25519"
-  | "mldsa87+ed25519";
+  | "mldsa87+ed25519"
+  | "mldsa44+ecdsa-p256"
+  | "mldsa65+ecdsa-p256"
+  | "mldsa87+ecdsa-p256";
+
+/** KEK provider — who wraps the data-encryption key that seals private bytes. */
+export type KekProvider = "env" | "aws-kms" | "azure-kv";
+
+/** Where the classical signing-key half lives. */
+export type KeyHolderProvider = "postq-managed" | "aws-kms" | "azure-kv";
+
+/** Where the post-quantum signing-key half lives. */
+export type PqProvider = "postq-managed" | "aws-cloudhsm" | "azure-managed-hsm";
 
 /** A managed signing key owned by your org. */
 export interface HybridKey {
@@ -327,6 +339,12 @@ export interface HybridKeyWithPublic extends HybridKey {
 export interface HybridKeyCreateInput {
   name: string;
   algorithm?: HybridAlgorithm;
+  /** KEK provider (where the data-encryption key is wrapped). */
+  kekProvider?: KekProvider;
+  /** Where the classical signing-key half lives. */
+  keyProvider?: KeyHolderProvider;
+  /** Where the post-quantum half lives. */
+  pqProvider?: PqProvider;
   metadata?: Record<string, unknown>;
 }
 
@@ -374,4 +392,217 @@ export interface HybridVerifyResult {
   /** Per-component breakdown — useful when one half is misbehaving. */
   classicalOk: boolean;
   pqOk: boolean;
+}
+
+/* ────────────────────────── Hybrid key audit ────────────────────────── */
+
+export interface HybridKeyAuditEntry {
+  id: string;
+  operation: "sign" | "verify";
+  payloadSha256: string;
+  payloadSize: number;
+  verified: boolean | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface HybridKeyAuditResult {
+  data: HybridKeyAuditEntry[];
+  pagination: Pagination;
+}
+
+/* ────────────────────────── Policies ────────────────────────── */
+
+export type PolicyAction = "enforce" | "warn" | "audit";
+export type PolicyOperation = "sign" | "verify" | "key_create" | "*";
+
+export interface PolicyRule {
+  matchOperation: PolicyOperation;
+  /** Whitelist. If non-null/non-empty, algorithm MUST be in this set. */
+  algorithmIn?: string[] | null;
+  /** Blacklist. If non-null/non-empty, algorithm MUST NOT be in this set. */
+  algorithmNotIn?: string[] | null;
+  /** If true, only hybrid algorithms (containing '+') pass. */
+  requireHybrid?: boolean;
+  /** Minimum NIST PQ level: 2 (ML-DSA-44), 3 (ML-DSA-65), 5 (ML-DSA-87). */
+  minPqLevel?: 2 | 3 | 5 | null;
+}
+
+export interface Policy {
+  id: string;
+  name: string;
+  description: string;
+  action: PolicyAction;
+  enabled: boolean;
+  /** Empty array means "any environment". */
+  environments: string[];
+  rule: PolicyRule;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PolicyCreateInput {
+  name: string;
+  description?: string;
+  action: PolicyAction;
+  enabled?: boolean;
+  environments?: string[];
+  rule: PolicyRule;
+}
+
+export interface PolicyUpdateInput {
+  name?: string;
+  description?: string;
+  action?: PolicyAction;
+  enabled?: boolean;
+  environments?: string[];
+  rule?: Partial<PolicyRule>;
+}
+
+/* ────────────────────────── Ledger ────────────────────────── */
+
+export type LedgerEventType =
+  | "key.created"
+  | "key.rotated"
+  | "key.revoked"
+  | "signature.issued"
+  | "signature.verified"
+  | "vault.settings_changed"
+  | "scan.completed"
+  | "policy.violated"
+  | "custom.event";
+
+export interface LedgerEntry {
+  id: string;
+  seq: number;
+  prevHashHex: string;
+  entryHashHex: string;
+  payload: Record<string, unknown>;
+  eventType: LedgerEventType | string;
+  subjectId: string | null;
+  actorId: string | null;
+  createdAt: string;
+}
+
+export interface LedgerCheckpoint {
+  id: string;
+  treeSize: number;
+  merkleRootHex: string;
+  signatureBase64: string;
+  signingKeyId: string;
+  publishedTo: string[];
+  createdAt: string;
+}
+
+export interface LedgerInclusionProof {
+  entryId: string;
+  leafIndex: number;
+  leafHashHex: string;
+  checkpoint: {
+    treeSize: number;
+    merkleRootHex: string;
+    signatureBase64: string;
+    signingKeyId: string;
+    createdAt: string;
+  };
+  proofHex: string[];
+}
+
+export interface LedgerSealResult {
+  treeSize: number;
+  merkleRootHex: string;
+  signatureBase64: string;
+  signingKeyId: string;
+  createdAt: string;
+}
+
+export interface LedgerAppendInput {
+  /** Required short label (e.g. "build.released"). */
+  name: string;
+  /** Optional human-readable message. */
+  message?: string;
+  /** Optional correlation id for the event. */
+  subjectId?: string;
+  /** Optional structured payload. Must be JSON-serializable. */
+  data?: Record<string, unknown>;
+}
+
+export interface LedgerEntryListOptions {
+  /** Lower bound on `seq` (inclusive). */
+  since?: number;
+  limit?: number;
+  /** Filter to a single event type. */
+  eventType?: string;
+}
+
+export interface LedgerBundleSigningKey {
+  id: string;
+  algorithm: HybridAlgorithm;
+  publicClassicalBase64: string;
+  publicPqBase64: string;
+}
+
+export interface LedgerBundle {
+  version: number;
+  org: string;
+  generatedAt: string;
+  entries: {
+    id: string;
+    seq: number;
+    prevHashHex: string;
+    entryHashHex: string;
+    payload: Record<string, unknown>;
+    createdAt: string;
+  }[];
+  checkpoints: {
+    treeSize: number;
+    merkleRootHex: string;
+    signatureBase64: string;
+    signingKeyId: string;
+    createdAt: string;
+  }[];
+  signingKeys: LedgerBundleSigningKey[];
+}
+
+/* ────────────────────────── Vault settings ────────────────────────── */
+
+export interface VaultSettingsAws {
+  keyArn: string;
+  roleArn?: string | null;
+  externalId?: string | null;
+  region?: string | null;
+}
+
+export interface VaultSettingsAzure {
+  vaultUrl: string;
+  kekName: string;
+  tenantId?: string | null;
+  clientId?: string | null;
+  /** Server never echoes the secret. True if one was previously stored. */
+  clientSecretConfigured?: boolean;
+}
+
+export interface VaultSettings {
+  defaultKekProvider: KekProvider;
+  aws: VaultSettingsAws | null;
+  azure: VaultSettingsAzure | null;
+  updatedAt: string;
+}
+
+export interface VaultSettingsInput {
+  defaultKekProvider: KekProvider;
+  aws?: {
+    keyArn: string;
+    roleArn?: string;
+    externalId?: string;
+    region?: string;
+  };
+  azure?: {
+    vaultUrl: string;
+    kekName: string;
+    tenantId?: string;
+    clientId?: string;
+    /** Provide once; encrypted server-side and never echoed. */
+    clientSecret?: string;
+  };
 }

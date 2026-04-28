@@ -25,13 +25,22 @@ from .models import (
     Finding,
     HybridAlgorithm,
     HybridKey,
+    HybridKeyAuditEntry,
     HybridKeyWithPublic,
     HybridSignResult,
     HybridVerifyResult,
     Key,
+    LedgerBundle,
+    LedgerCheckpoint,
+    LedgerEntry,
+    LedgerInclusionProof,
+    LedgerSealResult,
+    Policy,
+    PolicyRule,
     ScanDetail,
     ScanListItem,
     ScanSubmitResult,
+    VaultSettings,
 )
 
 DEFAULT_BASE_URL = "https://api.postq.dev"
@@ -79,7 +88,7 @@ class PostQ:
             total=max_retries,
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "DELETE"],
+            allowed_methods=["GET", "POST", "DELETE", "PATCH", "PUT"],
             respect_retry_after_header=True,
             # Surface the final response so we can map it to the right exception
             # type instead of urllib3 raising MaxRetryError.
@@ -104,6 +113,9 @@ class PostQ:
         self.assets = AssetsResource(self)
         self.keys = KeysResource(self)
         self.hybrid_keys = HybridKeysResource(self)
+        self.policies = PoliciesResource(self)
+        self.ledger = LedgerResource(self)
+        self.vault = VaultResource(self)
 
     # ── public ──────────────────────────────────────────────────────────────
 
@@ -518,6 +530,35 @@ class HybridKeysResource:
         body = self._client._request("DELETE", f"/v1/hybrid-keys/{key_id}")
         return body["data"]
 
+    def rotate(
+        self,
+        key_id: str,
+        *,
+        name: Optional[str] = None,
+    ) -> HybridKeyWithPublic:
+        """``POST /v1/hybrid-keys/:id/rotate`` — generate a new keypair under
+        the same logical key. Old material is retained for verification."""
+        body = self._client._request(
+            "POST",
+            f"/v1/hybrid-keys/{key_id}/rotate",
+            json=_strip_none({"name": name}),
+        )
+        return _row_to_hybrid_key_with_public(body["data"])
+
+    def audit(
+        self,
+        key_id: str,
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+    ) -> "list[HybridKeyAuditEntry]":
+        """``GET /v1/hybrid-keys/:id/audit`` — recent ledger entries for this key."""
+        params = _strip_none({"limit": limit, "cursor": cursor})
+        body = self._client._request(
+            "GET", f"/v1/hybrid-keys/{key_id}/audit", params=params
+        )
+        return [_row_to_audit_entry(row) for row in body["data"]]
+
     def sign(
         self,
         *,
@@ -606,4 +647,289 @@ def _row_to_hybrid_key_with_public(row: Mapping[str, Any]) -> HybridKeyWithPubli
         last_used_at=row.get("lastUsedAt"),
         metadata=dict(row.get("metadata") or {}),
         public_key=row["publicKey"],
+    )
+
+
+class PoliciesResource:
+    """Operations under ``/v1/policies`` — org-level policy rules enforced
+    by ``POST /v1/sign``."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def list(self) -> "list[Policy]":
+        """``GET /v1/policies`` — all policies for the org (seeds defaults
+        on first call)."""
+        body = self._client._request("GET", "/v1/policies")
+        return [_row_to_policy(row) for row in body["data"]]
+
+    def get(self, policy_id: str) -> Policy:
+        body = self._client._request("GET", f"/v1/policies/{policy_id}")
+        return _row_to_policy(body["data"])
+
+    def create(
+        self,
+        *,
+        name: str,
+        rule: Mapping[str, Any],
+        description: Optional[str] = None,
+        enabled: bool = True,
+    ) -> Policy:
+        """``POST /v1/policies`` — create a new policy."""
+        body = self._client._request(
+            "POST",
+            "/v1/policies",
+            json=_strip_none(
+                {
+                    "name": name,
+                    "description": description,
+                    "enabled": enabled,
+                    "rule": dict(rule),
+                }
+            ),
+        )
+        return _row_to_policy(body["data"])
+
+    def update(
+        self,
+        policy_id: str,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        enabled: Optional[bool] = None,
+        rule: Optional[Mapping[str, Any]] = None,
+    ) -> Policy:
+        """``PATCH /v1/policies/:id``."""
+        body = self._client._request(
+            "PATCH",
+            f"/v1/policies/{policy_id}",
+            json=_strip_none(
+                {
+                    "name": name,
+                    "description": description,
+                    "enabled": enabled,
+                    "rule": dict(rule) if rule is not None else None,
+                }
+            ),
+        )
+        return _row_to_policy(body["data"])
+
+    def delete(self, policy_id: str) -> "dict[str, Any]":
+        """``DELETE /v1/policies/:id``."""
+        body = self._client._request("DELETE", f"/v1/policies/{policy_id}")
+        return body["data"]
+
+
+class LedgerResource:
+    """Operations under ``/v1/ledger`` — read the tamper-evident hash chain
+    of signing events, fetch checkpoints / inclusion proofs, and download
+    verifiable bundles."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def entries(
+        self,
+        *,
+        since: Optional[int] = None,
+        limit: Optional[int] = None,
+        event_type: Optional[str] = None,
+    ) -> "list[LedgerEntry]":
+        """``GET /v1/ledger/entries`` — one page of ledger entries."""
+        params = _strip_none(
+            {"since": since, "limit": limit, "eventType": event_type}
+        )
+        body = self._client._request("GET", "/v1/ledger/entries", params=params)
+        return [_row_to_ledger_entry(row) for row in body["data"]]
+
+    def append(
+        self,
+        *,
+        name: str,
+        message: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        data: Optional[Mapping[str, Any]] = None,
+    ) -> LedgerEntry:
+        """``POST /v1/ledger/entries`` — append a custom entry to the org ledger."""
+        body = self._client._request(
+            "POST",
+            "/v1/ledger/entries",
+            json=_strip_none(
+                {
+                    "name": name,
+                    "message": message,
+                    "subjectId": subject_id,
+                    "data": dict(data) if data is not None else None,
+                }
+            ),
+        )
+        return _row_to_ledger_entry(body["data"])
+
+    def checkpoints(
+        self,
+        *,
+        limit: Optional[int] = None,
+        cursor: Optional[str] = None,
+    ) -> "list[LedgerCheckpoint]":
+        """``GET /v1/ledger/checkpoints`` — list signed Merkle-root checkpoints."""
+        params = _strip_none({"limit": limit, "cursor": cursor})
+        body = self._client._request("GET", "/v1/ledger/checkpoints", params=params)
+        return [_row_to_checkpoint(row) for row in body["data"]]
+
+    def latest_checkpoint(self) -> Optional[LedgerCheckpoint]:
+        """``GET /v1/ledger/checkpoints/latest``. Returns ``None`` if the
+        ledger has not been sealed yet."""
+        body = self._client._request("GET", "/v1/ledger/checkpoints/latest")
+        data = body.get("data")
+        return _row_to_checkpoint(data) if data else None
+
+    def seal(self) -> LedgerSealResult:
+        """``POST /v1/ledger/seal`` — force a new checkpoint over current entries."""
+        body = self._client._request("POST", "/v1/ledger/seal")
+        d = body["data"]
+        return LedgerSealResult(
+            checkpoint=_row_to_checkpoint(d["checkpoint"]) if d.get("checkpoint") else None,
+            sealed=bool(d.get("sealed", False)),
+            entries_covered=int(d.get("entriesCovered", 0)),
+        )
+
+    def proof(self, entry_id: str) -> LedgerInclusionProof:
+        """``GET /v1/ledger/proof/:entryId`` — Merkle inclusion proof
+        (auto-seals if no checkpoint covers the entry yet)."""
+        body = self._client._request("GET", f"/v1/ledger/proof/{entry_id}")
+        d = body["data"]
+        return LedgerInclusionProof(
+            entry_id=str(d["entryId"]),
+            seq=int(d["seq"]),
+            leaf_hash=str(d["leafHash"]),
+            merkle_path=list(d.get("merklePath") or []),
+            checkpoint=_row_to_checkpoint(d["checkpoint"]),
+        )
+
+    def bundle(self) -> LedgerBundle:
+        """``GET /v1/ledger/bundle`` — full verifiable bundle: entries +
+        checkpoints + signing keys."""
+        body = self._client._request("GET", "/v1/ledger/bundle")
+        d = body["data"]
+        return LedgerBundle(
+            version=str(d.get("version", "")),
+            org=dict(d.get("org") or {}),
+            generated_at=str(d.get("generatedAt", "")),
+            entries=[_row_to_ledger_entry(r) for r in d.get("entries") or []],
+            checkpoints=[_row_to_checkpoint(r) for r in d.get("checkpoints") or []],
+            signing_keys=list(d.get("signingKeys") or []),
+        )
+
+
+class VaultResource:
+    """Operations under ``/v1/vault`` — manage per-org KMS settings (BYOK).
+    The encrypted secret is never returned in plaintext."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def get_settings(self) -> Optional[VaultSettings]:
+        """``GET /v1/vault/settings`` — current settings, or ``None``."""
+        body = self._client._request("GET", "/v1/vault/settings")
+        data = body.get("data")
+        return _row_to_vault_settings(data) if data else None
+
+    def put_settings(
+        self,
+        *,
+        kek_provider: str,
+        aws: Optional[Mapping[str, Any]] = None,
+        azure: Optional[Mapping[str, Any]] = None,
+    ) -> VaultSettings:
+        """``PUT /v1/vault/settings`` — set or update KMS settings."""
+        body = self._client._request(
+            "PUT",
+            "/v1/vault/settings",
+            json=_strip_none(
+                {
+                    "kekProvider": kek_provider,
+                    "aws": dict(aws) if aws is not None else None,
+                    "azure": dict(azure) if azure is not None else None,
+                }
+            ),
+        )
+        return _row_to_vault_settings(body["data"])
+
+    def clear_settings(self) -> "dict[str, Any]":
+        """``DELETE /v1/vault/settings`` — revert to env-managed KEK."""
+        body = self._client._request("DELETE", "/v1/vault/settings")
+        return body["data"]
+
+
+# ── row mappers for new resources ────────────────────────────────────────────
+
+
+def _row_to_audit_entry(row: Mapping[str, Any]) -> HybridKeyAuditEntry:
+    return HybridKeyAuditEntry(
+        id=str(row["id"]),
+        seq=int(row["seq"]),
+        event_type=str(row["eventType"]),
+        created_at=str(row["createdAt"]),
+        actor=row.get("actor"),
+        subject_id=row.get("subjectId"),
+        data=dict(row.get("data") or {}),
+    )
+
+
+def _row_to_policy(row: Mapping[str, Any]) -> Policy:
+    rule_raw = row.get("rule") or {}
+    rule = PolicyRule(
+        operations=list(rule_raw.get("operations") or []),
+        action=str(rule_raw.get("action") or "deny"),
+        algorithms=rule_raw.get("algorithms"),
+        key_ids=rule_raw.get("keyIds"),
+        max_payload_bytes=rule_raw.get("maxPayloadBytes"),
+        require_metadata_keys=rule_raw.get("requireMetadataKeys"),
+        message=rule_raw.get("message"),
+    )
+    return Policy(
+        id=str(row["id"]),
+        name=str(row["name"]),
+        description=row.get("description"),
+        enabled=bool(row.get("enabled", True)),
+        rule=rule,
+        created_at=str(row["createdAt"]),
+        updated_at=str(row["updatedAt"]),
+    )
+
+
+def _row_to_ledger_entry(row: Mapping[str, Any]) -> LedgerEntry:
+    return LedgerEntry(
+        id=str(row["id"]),
+        seq=int(row["seq"]),
+        event_type=str(row["eventType"]),
+        created_at=str(row["createdAt"]),
+        prev_hash=str(row.get("prevHash") or ""),
+        leaf_hash=str(row.get("leafHash") or ""),
+        actor=row.get("actor"),
+        subject_id=row.get("subjectId"),
+        data=dict(row.get("data") or {}),
+    )
+
+
+def _row_to_checkpoint(row: Mapping[str, Any]) -> LedgerCheckpoint:
+    return LedgerCheckpoint(
+        id=str(row["id"]),
+        seq=int(row["seq"]),
+        merkle_root=str(row["merkleRoot"]),
+        entries_count=int(row.get("entriesCount") or 0),
+        signed_at=str(row["signedAt"]),
+        signing_key_id=str(row.get("signingKeyId") or ""),
+        signature=str(row.get("signature") or ""),
+        algorithm=row.get("algorithm"),
+    )
+
+
+def _row_to_vault_settings(row: Mapping[str, Any]) -> VaultSettings:
+    return VaultSettings(
+        kek_provider=str(row["kekProvider"]),
+        aws=dict(row["aws"]) if row.get("aws") else None,
+        azure=dict(row["azure"]) if row.get("azure") else None,
+        configured_at=row.get("configuredAt"),
+        updated_at=row.get("updatedAt"),
     )

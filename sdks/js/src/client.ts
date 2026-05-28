@@ -45,6 +45,11 @@ import {
   LedgerBundle,
   VaultSettings,
   VaultSettingsInput,
+  AttestationPolicy,
+  AttestationPolicyCreateInput,
+  AttestationPolicyListOptions,
+  AttestationPolicyListResult,
+  AttestationPolicyUpdateInput,
 } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.postq.dev";
@@ -79,6 +84,7 @@ export class PostQ {
   readonly policies: PoliciesResource;
   readonly ledger: LedgerResource;
   readonly vault: VaultResource;
+  readonly attestationPolicies: AttestationPoliciesResource;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -110,6 +116,7 @@ export class PostQ {
     this.policies = new PoliciesResource(this);
     this.ledger = new LedgerResource(this);
     this.vault = new VaultResource(this);
+    this.attestationPolicies = new AttestationPoliciesResource(this);
   }
 
   /** Hit `GET /health`. Throws if the API is down. */
@@ -730,6 +737,92 @@ export class VaultResource {
       "DELETE",
       "/v1/vault/settings",
     );
+    return envelope.data;
+  }
+}
+/**
+ * Attestation policies — constrain which enclave images may sign with the
+ * hybrid keys bound to them. Each policy is single-vendor (mock,
+ * aws-nitro-enclave, azure-confidential-vm, gcp-confidential-space).
+ *
+ * @example
+ * ```ts
+ * const root = await fetchEnclaveRoot();          // out-of-band
+ * const policy = await pq.attestationPolicies.create({
+ *   name: "release-signing-prod",
+ *   vendor: "mock",
+ *   matchRules: {
+ *     allowedImageHashes: [enclaveImageHash],
+ *     rootPublicKeyB64: root.publicKeyB64,
+ *   },
+ *   enforce: true,
+ * });
+ * const key = await pq.hybridKeys.create({
+ *   name: "release-signing",
+ *   pqProvider: "enclave-mock",
+ *   attestationPolicyId: policy.id,
+ * });
+ * ```
+ */
+export class AttestationPoliciesResource {
+  constructor(private readonly client: PostQ) {}
+
+  /** `POST /v1/attestation-policies` — create a new policy. */
+  async create(
+    input: AttestationPolicyCreateInput,
+  ): Promise<AttestationPolicy> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: AttestationPolicy;
+    }>("POST", "/v1/attestation-policies", { body: input });
+    return envelope.data;
+  }
+
+  /** `GET /v1/attestation-policies` — list policies for the org. */
+  async list(
+    opts: AttestationPolicyListOptions = {},
+  ): Promise<AttestationPolicyListResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: AttestationPolicy[];
+    }>("GET", "/v1/attestation-policies", {
+      query: { vendor: opts.vendor, limit: opts.limit },
+    });
+    return { data: envelope.data };
+  }
+
+  /** `GET /v1/attestation-policies/:id`. */
+  async get(id: string): Promise<AttestationPolicy> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: AttestationPolicy;
+    }>("GET", `/v1/attestation-policies/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  /** `PATCH /v1/attestation-policies/:id` — update mutable fields. */
+  async update(
+    id: string,
+    input: AttestationPolicyUpdateInput,
+  ): Promise<AttestationPolicy> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: AttestationPolicy;
+    }>("PATCH", `/v1/attestation-policies/${encodeURIComponent(id)}`, {
+      body: input,
+    });
+    return envelope.data;
+  }
+
+  /**
+   * `DELETE /v1/attestation-policies/:id` — delete a policy. Refused (409)
+   * if any keys are still bound to it; rotate or revoke those first.
+   */
+  async delete(id: string): Promise<{ id: string; deleted: true }> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: { id: string; deleted: true };
+    }>("DELETE", `/v1/attestation-policies/${encodeURIComponent(id)}`);
     return envelope.data;
   }
 }

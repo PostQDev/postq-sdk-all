@@ -312,7 +312,13 @@ export type KekProvider = "env" | "aws-kms" | "azure-kv";
 export type KeyHolderProvider = "postq-managed" | "aws-kms" | "azure-kv";
 
 /** Where the post-quantum signing-key half lives. */
-export type PqProvider = "postq-managed" | "aws-cloudhsm" | "azure-managed-hsm";
+export type PqProvider =
+  | "postq-managed"
+  | "aws-cloudhsm"
+  | "azure-managed-hsm"
+  /** Phase-1 attested signing: the PQ half lives inside the postq-enclave
+   *  mock backend and every sign returns an attestation doc. */
+  | "enclave-mock";
 
 /** A managed signing key owned by your org. */
 export interface HybridKey {
@@ -345,6 +351,13 @@ export interface HybridKeyCreateInput {
   keyProvider?: KeyHolderProvider;
   /** Where the post-quantum half lives. */
   pqProvider?: PqProvider;
+  /**
+   * Bind this key to an attestation policy. REQUIRED for enclave-kind
+   * `pqProvider` values (e.g. `enclave-mock`, future `aws-nitro-enclave`).
+   * Every sign call with this key returns an attestation doc that the API
+   * verifies against this policy before persisting the signature.
+   */
+  attestationPolicyId?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -376,6 +389,12 @@ export interface HybridSignResult {
   publicKey: string;
   payloadSha256: string;
   payloadSize: number;
+  /**
+   * Only present when the key is bound to an attestation policy and the
+   * signing backend produced an attestation doc. Use `verifyAttestationDoc()`
+   * to independently re-verify the doc on the caller side.
+   */
+  attestation?: AttestationOutcome;
 }
 
 export interface HybridVerifyInput {
@@ -605,4 +624,125 @@ export interface VaultSettingsInput {
     /** Provide once; encrypted server-side and never echoed. */
     clientSecret?: string;
   };
+}
+
+/* ─────────────────────── Attestation policies ─────────────────────── */
+
+/**
+ * Which trusted-execution backend produced the attestation document.
+ *
+ *   • `mock`                    Dev backend (ed25519 root over a JWS-shaped doc).
+ *   • `aws-nitro-enclave`       Reserved — real Nitro EIF + AWS Nitro root CA.
+ *   • `azure-confidential-vm`   Reserved — MAA-issued JWT.
+ *   • `gcp-confidential-space`  Reserved — Confidential Space OIDC token.
+ */
+export type AttestationVendor =
+  | "mock"
+  | "aws-nitro-enclave"
+  | "azure-confidential-vm"
+  | "gcp-confidential-space";
+
+/** Verdict the API records for a sign call. */
+export type AttestationVerdict = "pass" | "fail" | "absent";
+
+/**
+ * Per-vendor verification rules. For `mock` this is
+ * `{ allowedImageHashes: string[], rootPublicKeyB64: string }`.
+ * For real vendors (Phase 2+) this carries PCR allow-lists, root certs, etc.
+ */
+export type AttestationMatchRules = Record<string, unknown>;
+
+/**
+ * An attestation policy bound to one or more hybrid keys. Single-vendor.
+ */
+export interface AttestationPolicy {
+  id: string;
+  name: string;
+  vendor: AttestationVendor;
+  matchRules: AttestationMatchRules;
+  /** Reject docs older than this. */
+  maxDocAgeSeconds: number;
+  /** When false, failures are recorded but signing still succeeds. */
+  enforce: boolean;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AttestationPolicyCreateInput {
+  name: string;
+  vendor: AttestationVendor;
+  matchRules?: AttestationMatchRules;
+  /** Default: 300s. Range 5–86400. */
+  maxDocAgeSeconds?: number;
+  /** Default: true. */
+  enforce?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AttestationPolicyUpdateInput {
+  name?: string;
+  matchRules?: AttestationMatchRules;
+  maxDocAgeSeconds?: number;
+  enforce?: boolean;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AttestationPolicyListOptions {
+  vendor?: AttestationVendor;
+  limit?: number;
+}
+
+export interface AttestationPolicyListResult {
+  data: AttestationPolicy[];
+}
+
+/**
+ * The attestation summary attached to a sign response. The raw doc is in
+ * `docB64`; pass it to `verifyAttestationDoc()` to re-check it yourself.
+ */
+export interface AttestationOutcome {
+  vendor: AttestationVendor;
+  /** Hex sha256 of the enclave image / EIF / CVM measurement. */
+  imageHash: string;
+  /** Monotonic counter the enclave bumped for this sign call. */
+  counter: number;
+  /** Base64 of the raw vendor-specific attestation document. */
+  docB64: string;
+  verdict: AttestationVerdict;
+  /** Populated when verdict !== "pass". */
+  reason?: string;
+}
+
+/**
+ * Input for the client-side `verifyAttestationDoc()` helper. Lets a caller
+ * re-verify a doc without trusting the API's verdict.
+ */
+export interface AttestationVerifyInput {
+  /** Base64 of the raw attestation doc (i.e. `attestation.docB64`). */
+  docB64: string;
+  vendor: AttestationVendor;
+  /** Policy to verify against — usually the one bound to the signing key. */
+  policy: Pick<AttestationPolicy, "vendor" | "matchRules" | "maxDocAgeSeconds">;
+  /**
+   * Optional hash bindings. Pass these if you also have the corresponding
+   * sign result + payload — the verifier will reject the doc when claims do
+   * not match. Hex sha256 strings.
+   */
+  expectedSigSha256?: string;
+  expectedPayloadSha256?: string;
+  /**
+   * If true (default), reject docs older than `policy.maxDocAgeSeconds`.
+   * Set false when verifying historic signatures from the audit ledger.
+   */
+  enforceFreshness?: boolean;
+}
+
+export interface AttestationVerifyResult {
+  ok: boolean;
+  reason?: string;
+  vendor: AttestationVendor;
+  imageHash?: string;
+  counter?: number;
+  claims?: Record<string, unknown>;
 }

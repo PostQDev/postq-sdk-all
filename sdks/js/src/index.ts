@@ -7,7 +7,9 @@ export {
   PoliciesResource,
   LedgerResource,
   VaultResource,
+  AttestationPoliciesResource,
 } from "./client";
+export { verifyAttestationDoc } from "./attestation";
 export {
   PostQError,
   PostQConfigError,
@@ -82,4 +84,15 @@ export type {
   VaultSettingsAws,
   VaultSettingsAzure,
   VaultSettingsInput,
+  AttestationVendor,
+  AttestationVerdict,
+  AttestationMatchRules,
+  AttestationPolicy,
+  AttestationPolicyCreateInput,
+  AttestationPolicyUpdateInput,
+  AttestationPolicyListOptions,
+  AttestationPolicyListResult,
+  AttestationOutcome,
+  AttestationVerifyInput,
+  AttestationVerifyResult,
 } from "./types";

@@ -7,6 +7,11 @@
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
+    <!-- Allow the test host to run on a newer installed runtime (e.g. .NET 10)
+         when the net8.0 runtime isn't present. Test-only; the published
+         PostQ.Sdk library still targets net8.0. -->
+    <RollForward>Major</RollForward>
   </PropertyGroup>
 
   <ItemGroup>

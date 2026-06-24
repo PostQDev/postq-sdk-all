@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generic, Optional, TypeVar
 
 # Type aliases — kept as plain strings for 3.9 compatibility.
 Severity = str  # "critical" | "high" | "medium" | "low" | "info"
@@ -12,6 +12,46 @@ ScanSource = str  # "cli" | "helm" | "lambda" | "bicep" | "web" | "sdk"
 Provider = str  # "aws" | "azure" | "gcp" | "kubernetes" | "github" | "vault" | "url" | "other"
 AssetType = str  # "ENDPOINT" | "CERTIFICATE" | "KEY" | "DATA_STORE"
 ResourceRisk = str  # "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "NONE"
+
+T = TypeVar("T")
+
+
+@dataclass
+class Pagination:
+    """Cursor pagination metadata returned with every ``list()`` page."""
+
+    limit: int
+    next_cursor: Optional[str] = None
+
+
+@dataclass
+class Page(Generic[T]):
+    """One page of results from a ``list()`` call.
+
+    Mirrors the ``{ data, pagination }`` envelope returned by the JavaScript and
+    .NET SDKs so the surface is consistent across languages. For convenience it
+    also behaves like the list of items it wraps — you can iterate it, index it,
+    and call ``len()`` on it directly::
+
+        page = pq.scans.list(limit=20)
+        for scan in page:            # iterates page.data
+            ...
+        first = page[0]              # indexes page.data
+        count = len(page)            # len(page.data)
+        cursor = page.pagination.next_cursor
+    """
+
+    data: list[T]
+    pagination: Pagination
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __getitem__(self, index):
+        return self.data[index]
 
 
 @dataclass

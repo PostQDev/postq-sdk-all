@@ -35,6 +35,8 @@ from .models import (
     LedgerEntry,
     LedgerInclusionProof,
     LedgerSealResult,
+    Page,
+    Pagination,
     Policy,
     PolicyRule,
     ScanDetail,
@@ -44,6 +46,15 @@ from .models import (
 )
 
 DEFAULT_BASE_URL = "https://api.postq.dev"
+
+
+def _pagination(body: Mapping[str, Any], default_limit: int) -> Pagination:
+    """Build a :class:`Pagination` from a list-response envelope."""
+    raw = body.get("pagination") or {}
+    return Pagination(
+        limit=int(raw.get("limit", default_limit)),
+        next_cursor=raw.get("nextCursor"),
+    )
 
 
 class PostQ:
@@ -238,13 +249,21 @@ class ScansResource:
         *,
         limit: int = 20,
         cursor: Optional[str] = None,
-    ) -> "list[ScanListItem]":
-        """``GET /v1/scans`` — one page of recent scans."""
+    ) -> "Page[ScanListItem]":
+        """``GET /v1/scans`` — one page of recent scans.
+
+        Returns a :class:`Page` with ``.data`` (the rows) and ``.pagination``
+        (``.limit`` / ``.next_cursor``), matching the JS and .NET SDKs. The page
+        is iterable, so ``for scan in pq.scans.list(): ...`` keeps working.
+        """
         params: "dict[str, Any]" = {"limit": limit}
         if cursor:
             params["cursor"] = cursor
         body = self._client._request("GET", "/v1/scans", params=params)
-        return [_row_to_item(row) for row in body["data"]]
+        return Page(
+            data=[_row_to_item(row) for row in body["data"]],
+            pagination=_pagination(body, limit),
+        )
 
     def get(self, scan_id: str) -> ScanDetail:
         """``GET /v1/scans/:id`` — full scan record including HNDL,
@@ -329,8 +348,12 @@ class AssetsResource:
         type: Optional[str] = None,
         risk: Optional[str] = None,
         environment: Optional[str] = None,
-    ) -> "list[Asset]":
-        """``GET /v1/assets`` — one page of discovered assets."""
+    ) -> "Page[Asset]":
+        """``GET /v1/assets`` — one page of discovered assets.
+
+        Returns a :class:`Page` with ``.data`` and ``.pagination`` (parity with
+        the JS and .NET SDKs); the page is also directly iterable.
+        """
         params = _strip_none(
             {
                 "limit": limit,
@@ -342,7 +365,10 @@ class AssetsResource:
             }
         )
         body = self._client._request("GET", "/v1/assets", params=params)
-        return [_row_to_asset(row) for row in body["data"]]
+        return Page(
+            data=[_row_to_asset(row) for row in body["data"]],
+            pagination=_pagination(body, limit),
+        )
 
     def iter_all(
         self,
@@ -387,8 +413,12 @@ class KeysResource:
         provider: Optional[str] = None,
         algorithm: Optional[str] = None,
         risk: Optional[str] = None,
-    ) -> "list[Key]":
-        """``GET /v1/keys`` — one page of discovered cryptographic keys."""
+    ) -> "Page[Key]":
+        """``GET /v1/keys`` — one page of discovered cryptographic keys.
+
+        Returns a :class:`Page` with ``.data`` and ``.pagination`` (parity with
+        the JS and .NET SDKs); the page is also directly iterable.
+        """
         params = _strip_none(
             {
                 "limit": limit,
@@ -399,7 +429,10 @@ class KeysResource:
             }
         )
         body = self._client._request("GET", "/v1/keys", params=params)
-        return [_row_to_key(row) for row in body["data"]]
+        return Page(
+            data=[_row_to_key(row) for row in body["data"]],
+            pagination=_pagination(body, limit),
+        )
 
     def iter_all(
         self,

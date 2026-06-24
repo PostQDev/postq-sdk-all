@@ -1,8 +1,6 @@
 """Tests for the PostQ SDK against a mocked API."""
 from __future__ import annotations
 
-import os
-
 import pytest
 import responses
 
@@ -126,10 +124,16 @@ def test_list_scans() -> None:
     )
 
     pq = PostQ(api_key="pq_live_test")
-    items = pq.scans.list(limit=20)
-    assert len(items) == 1
-    assert items[0].id == "s1"
-    assert items[0].risk_level == "Medium"
+    page = pq.scans.list(limit=20)
+    assert len(page) == 1
+    assert page.data[0].id == "s1"
+    assert page.data[0].risk_level == "Medium"
+    # Parity with the JS/.NET SDKs: list() returns a Page with pagination.
+    assert page.pagination.limit == 20
+    assert page.pagination.next_cursor is None
+    # Back-compat: a Page is still iterable/indexable like the old bare list.
+    assert page[0].id == "s1"
+    assert [s.id for s in page] == ["s1"]
 
 
 @responses.activate

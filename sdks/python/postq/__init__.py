@@ -60,6 +60,8 @@ from .models import (
     LedgerEntry,
     LedgerInclusionProof,
     LedgerSealResult,
+    Page,
+    Pagination,
     Policy,
     PolicyAction,
     PolicyOperation,
@@ -114,5 +116,7 @@ __all__ = [
     "LedgerInclusionProof",
     "LedgerSealResult",
     "LedgerBundle",
+    "Page",
+    "Pagination",
     "VaultSettings",
 ]

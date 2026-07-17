@@ -131,6 +131,99 @@ describe("PostQ.scans.list()", () => {
   });
 });
 
+describe("server-side scan execution", () => {
+  it("POSTs cloud scan options to /v1/scans/cloud", async () => {
+    const fetchMock = mockFetch({
+      success: true,
+      data: {
+        id: "scan-cloud",
+        createdAt: "2026-07-16T00:00:00Z",
+        provider: "aws",
+        target: "123456789012",
+        mode: "live",
+        riskScore: 80,
+        riskLevel: "Critical",
+        findingsCount: 4,
+        resourcesCount: 10,
+        summary: {
+          totalEndpoints: 10,
+          quantumVulnerable: 4,
+          hybridEnabled: 0,
+          pqReady: 6,
+        },
+        url: "https://app.postq.dev/scans/scan-cloud",
+      },
+    }, 201);
+    const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+
+    const result = await pq.scans.runCloud({
+      provider: "aws",
+      target: "123456789012",
+      aws: { regions: ["us-east-1"] },
+    });
+
+    expect(result.provider).toBe("aws");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.postq.dev/v1/scans/cloud");
+    expect(JSON.parse(init.body as string).aws.regions).toEqual(["us-east-1"]);
+  });
+
+  it("POSTs URL scan requests to /v1/scans/url", async () => {
+    const fetchMock = mockFetch({
+      success: true,
+      data: { id: "scan-url", target: "example.com" },
+    }, 201);
+    const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+    const result = await pq.scans.runUrl({ target: "example.com", timeoutMs: 5000 });
+    expect(result.id).toBe("scan-url");
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.postq.dev/v1/scans/url");
+  });
+});
+
+describe("hybrid payload encoding", () => {
+  it("base64-encodes UTF-8 text without relying on a Node-only Buffer path", async () => {
+    const fetchMock = mockFetch({
+      success: true,
+      data: {
+        keyId: "00000000-0000-4000-8000-000000000001",
+        algorithm: "mldsa65+ed25519",
+        signature: "sig",
+        publicKey: "{}",
+        payloadSha256: "00",
+        payloadSize: 6,
+      },
+    });
+    const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+    await pq.sign({
+      keyId: "00000000-0000-4000-8000-000000000001",
+      payload: "héllo",
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).payload).toBe(
+      Buffer.from("héllo", "utf8").toString("base64"),
+    );
+  });
+});
+
+describe("Vault settings", () => {
+  it("returns the savedAt mutation result and sends defaultKekProvider", async () => {
+    const fetchMock = mockFetch({
+      success: true,
+      data: { savedAt: "2026-07-16T00:00:00Z" },
+    });
+    const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+    const result = await pq.vault.putSettings({
+      defaultKekProvider: "gcp-kms",
+      gcp: {
+        kekKeyName: "projects/acme/locations/global/keyRings/postq/cryptoKeys/kek",
+      },
+    });
+    expect(result.savedAt).toBe("2026-07-16T00:00:00Z");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).defaultKekProvider).toBe("gcp-kms");
+  });
+});
+
 describe("error mapping", () => {
   it("401 -> PostQAuthError", async () => {
     const pq = new PostQ({
@@ -170,6 +263,56 @@ describe("error mapping", () => {
       fetch: mockFetch({ success: false, error: "Bad" }, 400) as never,
     });
     await expect(pq.scans.list()).rejects.toThrow(PostQError);
+  });
+});
+
+describe("retry safety", () => {
+  it("retries an idempotent GET after a transient 503", async () => {
+    const fetchMock = jest
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        headers: { get: () => "0" },
+        text: () => Promise.resolve('{"error":"temporary"}'),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: () =>
+          Promise.resolve(
+            '{"success":true,"data":[],"pagination":{"limit":20,"nextCursor":null}}',
+          ),
+      });
+    const pq = new PostQ({
+      apiKey: "pq_live_test",
+      fetch: fetchMock as never,
+      maxRetries: 1,
+    });
+    await expect(pq.scans.list()).resolves.toEqual({
+      data: [],
+      pagination: { limit: 20, nextCursor: null },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never retries a non-idempotent POST", async () => {
+    const fetchMock = mockFetch({ success: false, error: "temporary" }, 503);
+    const pq = new PostQ({
+      apiKey: "pq_live_test",
+      fetch: fetchMock as never,
+      maxRetries: 3,
+    });
+    await expect(
+      pq.scans.submit({
+        type: "url",
+        target: "example.com",
+        riskScore: 0,
+        riskLevel: "Safe",
+      }),
+    ).rejects.toThrow(PostQServerError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -22,7 +22,7 @@ Example::
 """
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from .client import (
     AssetsResource,
@@ -46,6 +46,8 @@ from .errors import (
 from .models import (
     Asset,
     CertificateInfo,
+    CloudScanResult,
+    CloudScanSummary,
     Finding,
     HndlAssessment,
     HybridAlgorithm,
@@ -71,7 +73,9 @@ from .models import (
     ScanListItem,
     ScanSubmitResult,
     TlsInfo,
+    UrlScanResult,
     VaultSettings,
+    VaultSettingsSaveResult,
 )
 
 __all__ = [
@@ -96,6 +100,9 @@ __all__ = [
     "ScanDetail",
     "ScanFindingRow",
     "ScanSubmitResult",
+    "CloudScanSummary",
+    "CloudScanResult",
+    "UrlScanResult",
     "HndlAssessment",
     "CertificateInfo",
     "TlsInfo",
@@ -119,4 +126,5 @@ __all__ = [
     "Page",
     "Pagination",
     "VaultSettings",
+    "VaultSettingsSaveResult",
 ]

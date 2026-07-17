@@ -91,6 +91,90 @@ class ScanListItem:
     url: str
 
 
+@dataclass
+class CloudScanSummary:
+    total_endpoints: int
+    quantum_vulnerable: int
+    hybrid_enabled: int
+    pq_ready: int
+
+
+@dataclass
+class CloudScanResult:
+    id: str
+    created_at: str
+    provider: str
+    target: str
+    mode: str
+    risk_score: int
+    risk_level: str
+    findings_count: int
+    resources_count: int
+    summary: CloudScanSummary
+    url: str
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> "CloudScanResult":
+        summary = data.get("summary") or {}
+        return cls(
+            id=str(data["id"]),
+            created_at=str(data["createdAt"]),
+            provider=str(data["provider"]),
+            target=str(data["target"]),
+            mode=str(data["mode"]),
+            risk_score=int(data["riskScore"]),
+            risk_level=str(data["riskLevel"]),
+            findings_count=int(data["findingsCount"]),
+            resources_count=int(data["resourcesCount"]),
+            summary=CloudScanSummary(
+                total_endpoints=int(summary.get("totalEndpoints", 0)),
+                quantum_vulnerable=int(summary.get("quantumVulnerable", 0)),
+                hybrid_enabled=int(summary.get("hybridEnabled", 0)),
+                pq_ready=int(summary.get("pqReady", 0)),
+            ),
+            url=str(data["url"]),
+        )
+
+
+@dataclass
+class UrlScanResult:
+    id: str
+    created_at: str
+    target: str
+    mode: str
+    risk_score: int
+    risk_level: str
+    findings_count: int
+    scan_duration_ms: int
+    url: str
+    summary: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, str] = field(default_factory=dict)
+    findings: list = field(default_factory=list)
+    certificate: Optional[Dict[str, Any]] = None
+    tls: Optional[Dict[str, Any]] = None
+    hndl: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def from_api(cls, data: Dict[str, Any]) -> "UrlScanResult":
+        return cls(
+            id=str(data["id"]),
+            created_at=str(data["createdAt"]),
+            target=str(data["target"]),
+            mode=str(data["mode"]),
+            risk_score=int(data["riskScore"]),
+            risk_level=str(data["riskLevel"]),
+            findings_count=int(data["findingsCount"]),
+            scan_duration_ms=int(data.get("scanDurationMs", 0)),
+            url=str(data["url"]),
+            summary=dict(data.get("summary") or {}),
+            metadata=dict(data.get("metadata") or {}),
+            findings=list(data.get("findings") or []),
+            certificate=data.get("certificate"),
+            tls=data.get("tls"),
+            hndl=data.get("hndl"),
+        )
+
+
 # ─────────────────────────── Scan detail ───────────────────────────
 
 HndlSeverity = str  # "critical" | "high" | "medium" | "low" | "none"
@@ -347,35 +431,32 @@ class HybridVerifyResult:
 
 @dataclass
 class HybridKeyAuditEntry:
-    """A single ledger entry surfaced by ``GET /v1/hybrid-keys/:id/audit``."""
+    """A single sign/verify audit row for one hybrid key."""
 
     id: str
-    seq: int
-    event_type: str
+    operation: str
+    payload_sha256: str
+    payload_size: int
+    verified: Optional[bool]
     created_at: str
-    actor: Optional[str] = None
-    subject_id: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 # ─────────────────────────── Policies ───────────────────────────
 
-PolicyAction = str  # "allow" | "deny" | "require_approval"
-PolicyOperation = str  # "sign" | "verify" | "create_key" | "revoke_key" | "rotate_key"
+PolicyAction = str  # "enforce" | "warn" | "audit"
+PolicyOperation = str  # "sign" | "verify" | "key_create" | "*"
 
 
 @dataclass
 class PolicyRule:
-    """The typed rule body of a policy. ``operations`` and ``action`` are
-    required; the remaining fields are optional constraints."""
+    """Typed cryptographic constraints evaluated by the API."""
 
-    operations: list = field(default_factory=list)
-    action: PolicyAction = "deny"
-    algorithms: Optional[list] = None
-    key_ids: Optional[list] = None
-    max_payload_bytes: Optional[int] = None
-    require_metadata_keys: Optional[list] = None
-    message: Optional[str] = None
+    match_operation: PolicyOperation = "*"
+    algorithm_in: Optional[list] = None
+    algorithm_not_in: Optional[list] = None
+    require_hybrid: bool = False
+    min_pq_level: Optional[int] = None
 
 
 @dataclass
@@ -384,11 +465,13 @@ class Policy:
 
     id: str
     name: str
+    description: str
+    action: PolicyAction
     enabled: bool
+    environments: list
     rule: PolicyRule
     created_at: str
     updated_at: str
-    description: Optional[str] = None
 
 
 # ─────────────────────────── Ledger ───────────────────────────
@@ -400,13 +483,13 @@ class LedgerEntry:
 
     id: str
     seq: int
+    prev_hash_hex: str
+    entry_hash_hex: str
+    payload: Dict[str, Any]
     event_type: str
-    created_at: str
-    prev_hash: str
-    leaf_hash: str
-    actor: Optional[str] = None
     subject_id: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    actor_id: Optional[str] = None
+    created_at: str = ""
 
 
 @dataclass
@@ -414,13 +497,12 @@ class LedgerCheckpoint:
     """A signed Merkle-root checkpoint over a range of ledger entries."""
 
     id: str
-    seq: int
-    merkle_root: str
-    entries_count: int
-    signed_at: str
+    tree_size: int
+    merkle_root_hex: str
+    signature_base64: str
     signing_key_id: str
-    signature: str
-    algorithm: Optional[str] = None
+    published_to: list
+    created_at: str
 
 
 @dataclass
@@ -428,27 +510,30 @@ class LedgerInclusionProof:
     """A Merkle inclusion proof for a single ledger entry."""
 
     entry_id: str
-    seq: int
-    leaf_hash: str
-    merkle_path: list
-    checkpoint: LedgerCheckpoint
+    leaf_index: int
+    leaf_hash_hex: str
+    checkpoint: Dict[str, Any]
+    proof_hex: list
 
 
 @dataclass
 class LedgerSealResult:
     """Returned by ``POST /v1/ledger/seal``."""
 
-    checkpoint: Optional[LedgerCheckpoint]
-    sealed: bool
-    entries_covered: int
+    tree_size: int
+    merkle_root_hex: str
+    signature_base64: str
+    signing_key_id: str
+    created_at: str
+    fresh: bool
 
 
 @dataclass
 class LedgerBundle:
     """A verifiable bundle returned by ``GET /v1/ledger/bundle``."""
 
-    version: str
-    org: Dict[str, Any]
+    version: int
+    org: str
     generated_at: str
     entries: list
     checkpoints: list
@@ -464,8 +549,13 @@ class VaultSettings:
 
     The encrypted secret is never returned in plaintext."""
 
-    kek_provider: str  # "env" | "aws-kms" | "azure-kv"
+    default_kek_provider: str  # "env" | "aws-kms" | "azure-kv" | "gcp-kms"
     aws: Optional[Dict[str, Any]] = None
     azure: Optional[Dict[str, Any]] = None
-    configured_at: Optional[str] = None
+    gcp: Optional[Dict[str, Any]] = None
     updated_at: Optional[str] = None
+
+
+@dataclass
+class VaultSettingsSaveResult:
+    saved_at: str

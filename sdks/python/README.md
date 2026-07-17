@@ -40,25 +40,57 @@ print(detail.hndl.severity if detail.hndl else None,
 
 # Download the CycloneDX 1.6 CBOM for a scan
 cbom = pq.scans.cbom(result.id)  # parsed dict
+
+# Or ask the API to perform and persist a real scan
+tls = pq.scans.run_url(target="example.com")
+aws = pq.scans.run_cloud(
+    provider="aws",
+    target="123456789012",
+    aws={"regions": ["us-east-1"]},
+)
 ```
 
 ## Assets and keys (0.3.0+)
 
 ```python
 # Browse your cryptographic inventory
-assets = pq.assets.list(provider="aws", risk="high", limit=50)
+assets = pq.assets.list(provider="aws", risk="HIGH", limit=50)
 for a in assets.data:
-    print(a.name, a.algorithm, a.risk_level)
+    print(a.name, a.algorithm, a.risk)
 
 # Or stream every asset
 for a in pq.assets.iter_all(environment="production"):
     ...
 
 # Browse keys discovered by cloud scans
-keys = pq.keys.list(algorithm="RSA", quantum_vulnerable=True)
+keys = pq.keys.list(algorithm="RSA", risk="High")
 for k in keys.data:
-    print(k.provider, k.region, k.key_id, k.algorithm)
+    print(k.provider, k.region, k.external_id, k.algorithm)
 ```
+
+## Hybrid signing and multicloud Vault
+
+```python
+pq.vault.put_settings(
+    default_kek_provider="gcp-kms",
+    gcp={
+        "kekKeyName": "projects/acme/locations/global/keyRings/postq/cryptoKeys/vault-kek",
+        "keyRingName": "projects/acme/locations/us-east1/keyRings/postq-signing",
+        "protectionLevel": "HSM",
+    },
+)
+key = pq.hybrid_keys.create(
+    name="release-signing",
+    algorithm="mldsa65+ecdsa-p256",
+    kek_provider="gcp-kms",
+    key_provider="gcp-kms",
+)
+signature = pq.sign(key_id=key.id, payload="release manifest")
+assert pq.verify(
+    public_key=key.public_key,
+    payload="release manifest",
+    signature=signature.signature,
+).ok
 ```
 
 ## Configuration
@@ -68,7 +100,10 @@ for k in keys.data:
 | `api_key`     | `$POSTQ_API_KEY`         | `pq_live_…` from your dashboard        |
 | `base_url`    | `https://api.postq.dev`  | Override for staging or self-hosted    |
 | `timeout`     | `30.0`                   | Per-request timeout in seconds         |
-| `max_retries` | `3`                      | Retries on 429/5xx with backoff        |
+| `max_retries` | `3`                      | Idempotent-request retries on 429/5xx  |
+
+POST operations are never automatically replayed because they can create keys,
+signatures, scans, policies, or Ledger entries.
 
 ## Errors
 

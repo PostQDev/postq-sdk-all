@@ -310,6 +310,37 @@ public sealed class ScansResource
         return _client.SendAsync<System.Text.Json.JsonElement>(
             HttpMethod.Get, $"/v1/scans/{Uri.EscapeDataString(scanId)}/cbom", null, null, ct);
     }
+
+    /// <summary><c>POST /v1/scans/url</c> — run and persist a server-side TLS scan.</summary>
+    public async Task<UrlScanResult> RunUrlAsync(
+        UrlScanInput input,
+        CancellationToken ct = default)
+    {
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<UrlScanResult>>(
+                HttpMethod.Post, "/v1/scans/url", input, null, ct)
+            .ConfigureAwait(false);
+        return envelope?.Data
+            ?? throw new PostQException("API returned no data for POST /v1/scans/url");
+    }
+
+    /// <summary><c>POST /v1/scans/cloud</c> — run and persist a cloud inventory scan.</summary>
+    public async Task<CloudScanResult> RunCloudAsync(
+        CloudScanInput input,
+        CancellationToken ct = default)
+    {
+        if (input.Provider is not ("aws" or "azure"))
+        {
+            throw new PostQConfigException(
+                "Provider must be 'aws' or 'azure'; Kubernetes uses the in-cluster agent.");
+        }
+        var envelope = await _client
+            .SendAsync<ApiEnvelope<CloudScanResult>>(
+                HttpMethod.Post, "/v1/scans/cloud", input, null, ct)
+            .ConfigureAwait(false);
+        return envelope?.Data
+            ?? throw new PostQException("API returned no data for POST /v1/scans/cloud");
+    }
 }
 
 /// <summary>Operations under <c>/v1/assets</c>.</summary>
@@ -450,6 +481,10 @@ public sealed class HybridKeysResource
         {
             name = input.Name,
             algorithm = input.Algorithm,
+            kekProvider = input.KekProvider,
+            keyProvider = input.KeyProvider,
+            pqProvider = input.PqProvider,
+            attestationPolicyId = input.AttestationPolicyId,
             metadata = input.Metadata ?? new Dictionary<string, object?>(),
         };
         var envelope = await _client
@@ -803,12 +838,12 @@ public sealed class VaultResource
     }
 
     /// <summary><c>PUT /v1/vault/settings</c> — set or update KMS settings.</summary>
-    public async Task<VaultSettings> PutSettingsAsync(
+    public async Task<VaultSettingsSaveResult> PutSettingsAsync(
         VaultSettingsInput input,
         CancellationToken ct = default)
     {
         var envelope = await _client
-            .SendAsync<ApiEnvelope<VaultSettings>>(
+            .SendAsync<ApiEnvelope<VaultSettingsSaveResult>>(
                 HttpMethod.Put, "/v1/vault/settings", input, null, ct)
             .ConfigureAwait(false);
         if (envelope?.Data is null) throw new PostQException("API returned no data for PUT /v1/vault/settings");

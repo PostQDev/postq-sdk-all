@@ -22,6 +22,7 @@ from .errors import (
 )
 from .models import (
     Asset,
+    CloudScanResult,
     Finding,
     HybridAlgorithm,
     HybridKey,
@@ -42,7 +43,9 @@ from .models import (
     ScanDetail,
     ScanListItem,
     ScanSubmitResult,
+    UrlScanResult,
     VaultSettings,
+    VaultSettingsSaveResult,
 )
 
 DEFAULT_BASE_URL = "https://api.postq.dev"
@@ -99,7 +102,9 @@ class PostQ:
             total=max_retries,
             backoff_factor=0.5,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=["GET", "POST", "DELETE", "PATCH", "PUT"],
+            # POST endpoints create keys, signatures, scans, and ledger rows;
+            # never replay them without an explicit idempotency contract.
+            allowed_methods=["GET", "HEAD", "OPTIONS", "DELETE", "PUT"],
             respect_retry_after_header=True,
             # Surface the final response so we can map it to the right exception
             # type instead of urllib3 raising MaxRetryError.
@@ -270,6 +275,47 @@ class ScansResource:
         certificate, TLS, and findings when populated."""
         body = self._client._request("GET", f"/v1/scans/{scan_id}")
         return ScanDetail.from_api(body["data"])
+
+    def run_url(
+        self,
+        *,
+        target: str,
+        timeout_ms: Optional[int] = None,
+    ) -> UrlScanResult:
+        """``POST /v1/scans/url`` — run and persist a server-side TLS scan."""
+        body = self._client._request(
+            "POST",
+            "/v1/scans/url",
+            json=_strip_none({"target": target, "timeoutMs": timeout_ms}),
+        )
+        return UrlScanResult.from_api(body["data"])
+
+    def run_cloud(
+        self,
+        *,
+        provider: str,
+        target: str,
+        aws: Optional[Mapping[str, Any]] = None,
+        azure: Optional[Mapping[str, Any]] = None,
+    ) -> CloudScanResult:
+        """``POST /v1/scans/cloud`` — run and persist a cloud inventory scan."""
+        if provider not in {"aws", "azure"}:
+            raise PostQConfigError(
+                "provider must be 'aws' or 'azure'; Kubernetes uses the in-cluster agent"
+            )
+        body = self._client._request(
+            "POST",
+            "/v1/scans/cloud",
+            json=_strip_none(
+                {
+                    "provider": provider,
+                    "target": target,
+                    "aws": dict(aws) if aws is not None else None,
+                    "azure": dict(azure) if azure is not None else None,
+                }
+            ),
+        )
+        return CloudScanResult.from_api(body["data"])
 
     def cbom(self, scan_id: str) -> "dict[str, Any]":
         """``GET /v1/scans/:id/cbom`` — CycloneDX 1.6 CBOM as a parsed dict."""
@@ -519,17 +565,27 @@ class HybridKeysResource:
         *,
         name: str,
         algorithm: HybridAlgorithm = "mldsa65+ed25519",
+        kek_provider: Optional[str] = None,
+        key_provider: str = "postq-managed",
+        pq_provider: str = "postq-managed",
+        attestation_policy_id: Optional[str] = None,
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> HybridKeyWithPublic:
         """``POST /v1/hybrid-keys`` — create a new managed signing key."""
         body = self._client._request(
             "POST",
             "/v1/hybrid-keys",
-            json={
-                "name": name,
-                "algorithm": algorithm,
-                "metadata": dict(metadata or {}),
-            },
+            json=_strip_none(
+                {
+                    "name": name,
+                    "algorithm": algorithm,
+                    "kekProvider": kek_provider,
+                    "keyProvider": key_provider,
+                    "pqProvider": pq_provider,
+                    "attestationPolicyId": attestation_policy_id,
+                    "metadata": dict(metadata or {}),
+                }
+            ),
         )
         return _row_to_hybrid_key_with_public(body["data"])
 
@@ -540,7 +596,7 @@ class HybridKeysResource:
         cursor: Optional[str] = None,
         algorithm: Optional[HybridAlgorithm] = None,
         include_revoked: bool = False,
-    ) -> "list[HybridKey]":
+    ) -> "Page[HybridKey]":
         """``GET /v1/hybrid-keys`` — one page of managed signing keys."""
         params = _strip_none(
             {
@@ -551,7 +607,10 @@ class HybridKeysResource:
             }
         )
         body = self._client._request("GET", "/v1/hybrid-keys", params=params)
-        return [_row_to_hybrid_key(row) for row in body["data"]]
+        return Page(
+            data=[_row_to_hybrid_key(row) for row in body["data"]],
+            pagination=_pagination(body, limit),
+        )
 
     def get(self, key_id: str) -> HybridKeyWithPublic:
         """``GET /v1/hybrid-keys/:id`` — fetch one key including public bytes."""
@@ -584,13 +643,17 @@ class HybridKeysResource:
         *,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
-    ) -> "list[HybridKeyAuditEntry]":
+    ) -> "Page[HybridKeyAuditEntry]":
         """``GET /v1/hybrid-keys/:id/audit`` — recent ledger entries for this key."""
         params = _strip_none({"limit": limit, "cursor": cursor})
         body = self._client._request(
             "GET", f"/v1/hybrid-keys/{key_id}/audit", params=params
         )
-        return [_row_to_audit_entry(row) for row in body["data"]]
+        effective_limit = limit or 25
+        return Page(
+            data=[_row_to_audit_entry(row) for row in body["data"]],
+            pagination=_pagination(body, effective_limit),
+        )
 
     def sign(
         self,
@@ -704,9 +767,11 @@ class PoliciesResource:
         self,
         *,
         name: str,
+        action: str,
         rule: Mapping[str, Any],
         description: Optional[str] = None,
         enabled: bool = True,
+        environments: Sequence[str] = (),
     ) -> Policy:
         """``POST /v1/policies`` — create a new policy."""
         body = self._client._request(
@@ -716,7 +781,9 @@ class PoliciesResource:
                 {
                     "name": name,
                     "description": description,
+                    "action": action,
                     "enabled": enabled,
+                    "environments": list(environments),
                     "rule": dict(rule),
                 }
             ),
@@ -729,7 +796,9 @@ class PoliciesResource:
         *,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        action: Optional[str] = None,
         enabled: Optional[bool] = None,
+        environments: Optional[Sequence[str]] = None,
         rule: Optional[Mapping[str, Any]] = None,
     ) -> Policy:
         """``PATCH /v1/policies/:id``."""
@@ -740,7 +809,9 @@ class PoliciesResource:
                 {
                     "name": name,
                     "description": description,
+                    "action": action,
                     "enabled": enabled,
+                    "environments": list(environments) if environments is not None else None,
                     "rule": dict(rule) if rule is not None else None,
                 }
             ),
@@ -767,13 +838,17 @@ class LedgerResource:
         since: Optional[int] = None,
         limit: Optional[int] = None,
         event_type: Optional[str] = None,
-    ) -> "list[LedgerEntry]":
+    ) -> "Page[LedgerEntry]":
         """``GET /v1/ledger/entries`` — one page of ledger entries."""
         params = _strip_none(
             {"since": since, "limit": limit, "eventType": event_type}
         )
         body = self._client._request("GET", "/v1/ledger/entries", params=params)
-        return [_row_to_ledger_entry(row) for row in body["data"]]
+        effective_limit = limit or 100
+        return Page(
+            data=[_row_to_ledger_entry(row) for row in body["data"]],
+            pagination=_pagination(body, effective_limit),
+        )
 
     def append(
         self,
@@ -803,11 +878,15 @@ class LedgerResource:
         *,
         limit: Optional[int] = None,
         cursor: Optional[str] = None,
-    ) -> "list[LedgerCheckpoint]":
+    ) -> "Page[LedgerCheckpoint]":
         """``GET /v1/ledger/checkpoints`` — list signed Merkle-root checkpoints."""
         params = _strip_none({"limit": limit, "cursor": cursor})
         body = self._client._request("GET", "/v1/ledger/checkpoints", params=params)
-        return [_row_to_checkpoint(row) for row in body["data"]]
+        effective_limit = limit or 20
+        return Page(
+            data=[_row_to_checkpoint(row) for row in body["data"]],
+            pagination=_pagination(body, effective_limit),
+        )
 
     def latest_checkpoint(self) -> Optional[LedgerCheckpoint]:
         """``GET /v1/ledger/checkpoints/latest``. Returns ``None`` if the
@@ -821,9 +900,12 @@ class LedgerResource:
         body = self._client._request("POST", "/v1/ledger/seal")
         d = body["data"]
         return LedgerSealResult(
-            checkpoint=_row_to_checkpoint(d["checkpoint"]) if d.get("checkpoint") else None,
-            sealed=bool(d.get("sealed", False)),
-            entries_covered=int(d.get("entriesCovered", 0)),
+            tree_size=int(d["treeSize"]),
+            merkle_root_hex=str(d["merkleRootHex"]),
+            signature_base64=str(d["signatureBase64"]),
+            signing_key_id=str(d["signingKeyId"]),
+            created_at=str(d["createdAt"]),
+            fresh=bool(d.get("fresh", True)),
         )
 
     def proof(self, entry_id: str) -> LedgerInclusionProof:
@@ -833,10 +915,10 @@ class LedgerResource:
         d = body["data"]
         return LedgerInclusionProof(
             entry_id=str(d["entryId"]),
-            seq=int(d["seq"]),
-            leaf_hash=str(d["leafHash"]),
-            merkle_path=list(d.get("merklePath") or []),
-            checkpoint=_row_to_checkpoint(d["checkpoint"]),
+            leaf_index=int(d["leafIndex"]),
+            leaf_hash_hex=str(d["leafHashHex"]),
+            proof_hex=list(d.get("proofHex") or []),
+            checkpoint=dict(d["checkpoint"]),
         )
 
     def bundle(self) -> LedgerBundle:
@@ -845,11 +927,11 @@ class LedgerResource:
         body = self._client._request("GET", "/v1/ledger/bundle")
         d = body["data"]
         return LedgerBundle(
-            version=str(d.get("version", "")),
-            org=dict(d.get("org") or {}),
+            version=int(d.get("version", 1)),
+            org=str(d.get("org") or ""),
             generated_at=str(d.get("generatedAt", "")),
-            entries=[_row_to_ledger_entry(r) for r in d.get("entries") or []],
-            checkpoints=[_row_to_checkpoint(r) for r in d.get("checkpoints") or []],
+            entries=list(d.get("entries") or []),
+            checkpoints=list(d.get("checkpoints") or []),
             signing_keys=list(d.get("signingKeys") or []),
         )
 
@@ -870,23 +952,29 @@ class VaultResource:
     def put_settings(
         self,
         *,
-        kek_provider: str,
+        default_kek_provider: Optional[str] = None,
+        kek_provider: Optional[str] = None,
         aws: Optional[Mapping[str, Any]] = None,
         azure: Optional[Mapping[str, Any]] = None,
-    ) -> VaultSettings:
+        gcp: Optional[Mapping[str, Any]] = None,
+    ) -> VaultSettingsSaveResult:
         """``PUT /v1/vault/settings`` — set or update KMS settings."""
+        provider = default_kek_provider or kek_provider
+        if not provider:
+            raise PostQConfigError("default_kek_provider is required")
         body = self._client._request(
             "PUT",
             "/v1/vault/settings",
             json=_strip_none(
                 {
-                    "kekProvider": kek_provider,
+                    "defaultKekProvider": provider,
                     "aws": dict(aws) if aws is not None else None,
                     "azure": dict(azure) if azure is not None else None,
+                    "gcp": dict(gcp) if gcp is not None else None,
                 }
             ),
         )
-        return _row_to_vault_settings(body["data"])
+        return VaultSettingsSaveResult(saved_at=str(body["data"]["savedAt"]))
 
     def clear_settings(self) -> "dict[str, Any]":
         """``DELETE /v1/vault/settings`` — revert to env-managed KEK."""
@@ -900,31 +988,31 @@ class VaultResource:
 def _row_to_audit_entry(row: Mapping[str, Any]) -> HybridKeyAuditEntry:
     return HybridKeyAuditEntry(
         id=str(row["id"]),
-        seq=int(row["seq"]),
-        event_type=str(row["eventType"]),
+        operation=str(row["operation"]),
+        payload_sha256=str(row["payloadSha256"]),
+        payload_size=int(row["payloadSize"]),
+        verified=row.get("verified"),
         created_at=str(row["createdAt"]),
-        actor=row.get("actor"),
-        subject_id=row.get("subjectId"),
-        data=dict(row.get("data") or {}),
+        metadata=dict(row.get("metadata") or {}),
     )
 
 
 def _row_to_policy(row: Mapping[str, Any]) -> Policy:
     rule_raw = row.get("rule") or {}
     rule = PolicyRule(
-        operations=list(rule_raw.get("operations") or []),
-        action=str(rule_raw.get("action") or "deny"),
-        algorithms=rule_raw.get("algorithms"),
-        key_ids=rule_raw.get("keyIds"),
-        max_payload_bytes=rule_raw.get("maxPayloadBytes"),
-        require_metadata_keys=rule_raw.get("requireMetadataKeys"),
-        message=rule_raw.get("message"),
+        match_operation=str(rule_raw.get("matchOperation") or "*"),
+        algorithm_in=rule_raw.get("algorithmIn"),
+        algorithm_not_in=rule_raw.get("algorithmNotIn"),
+        require_hybrid=bool(rule_raw.get("requireHybrid", False)),
+        min_pq_level=rule_raw.get("minPqLevel"),
     )
     return Policy(
         id=str(row["id"]),
         name=str(row["name"]),
-        description=row.get("description"),
+        description=str(row.get("description") or ""),
+        action=str(row["action"]),
         enabled=bool(row.get("enabled", True)),
+        environments=list(row.get("environments") or []),
         rule=rule,
         created_at=str(row["createdAt"]),
         updated_at=str(row["updatedAt"]),
@@ -935,34 +1023,33 @@ def _row_to_ledger_entry(row: Mapping[str, Any]) -> LedgerEntry:
     return LedgerEntry(
         id=str(row["id"]),
         seq=int(row["seq"]),
+        prev_hash_hex=str(row.get("prevHashHex") or ""),
+        entry_hash_hex=str(row.get("entryHashHex") or ""),
+        payload=dict(row.get("payload") or {}),
         event_type=str(row["eventType"]),
         created_at=str(row["createdAt"]),
-        prev_hash=str(row.get("prevHash") or ""),
-        leaf_hash=str(row.get("leafHash") or ""),
-        actor=row.get("actor"),
+        actor_id=row.get("actorId"),
         subject_id=row.get("subjectId"),
-        data=dict(row.get("data") or {}),
     )
 
 
 def _row_to_checkpoint(row: Mapping[str, Any]) -> LedgerCheckpoint:
     return LedgerCheckpoint(
         id=str(row["id"]),
-        seq=int(row["seq"]),
-        merkle_root=str(row["merkleRoot"]),
-        entries_count=int(row.get("entriesCount") or 0),
-        signed_at=str(row["signedAt"]),
-        signing_key_id=str(row.get("signingKeyId") or ""),
-        signature=str(row.get("signature") or ""),
-        algorithm=row.get("algorithm"),
+        tree_size=int(row["treeSize"]),
+        merkle_root_hex=str(row["merkleRootHex"]),
+        signature_base64=str(row["signatureBase64"]),
+        signing_key_id=str(row["signingKeyId"]),
+        published_to=list(row.get("publishedTo") or []),
+        created_at=str(row["createdAt"]),
     )
 
 
 def _row_to_vault_settings(row: Mapping[str, Any]) -> VaultSettings:
     return VaultSettings(
-        kek_provider=str(row["kekProvider"]),
+        default_kek_provider=str(row["defaultKekProvider"]),
         aws=dict(row["aws"]) if row.get("aws") else None,
         azure=dict(row["azure"]) if row.get("azure") else None,
-        configured_at=row.get("configuredAt"),
+        gcp=dict(row["gcp"]) if row.get("gcp") else None,
         updated_at=row.get("updatedAt"),
     )

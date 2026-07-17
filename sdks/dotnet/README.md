@@ -49,35 +49,71 @@ Console.WriteLine($"{detail.Hndl?.Severity} cert expires in {detail.Certificate?
 
 // Download the CycloneDX 1.6 CBOM for a scan
 JsonElement cbom = await pq.Scans.GetCbomAsync(result.Id);
+
+// Or ask the API to perform and persist a real scan
+var tls = await pq.Scans.RunUrlAsync(new UrlScanInput { Target = "example.com" });
+var aws = await pq.Scans.RunCloudAsync(new CloudScanInput
+{
+    Provider = "aws",
+    Target = "123456789012",
+    Aws = new CloudScanAwsOptions { Regions = new[] { "us-east-1" } },
+});
 ```
 
 ## Assets and keys (0.3.0+)
 
 ```csharp
 // Browse your cryptographic inventory
-var assets = await pq.Assets.ListAsync(new AssetsListInput
+var assets = await pq.Assets.ListAsync(new AssetListOptions
 {
     Provider = "aws",
-    Risk = "high",
+    Risk = "HIGH",
     Limit = 50,
 });
 foreach (var a in assets.Data)
 {
-    Console.WriteLine($"{a.Name}\t{a.Algorithm}\t{a.RiskLevel}");
+    Console.WriteLine($"{a.Name}\t{a.Algorithm}\t{a.Risk}");
 }
 
 // Or stream every asset
-await foreach (var a in pq.Assets.IterAllAsync(new AssetsListInput { Environment = "production" }))
+await foreach (var a in pq.Assets.IterAllAsync(new AssetListOptions { Environment = "production" }))
 {
     // ...
 }
 
 // Browse keys discovered by cloud scans
-var keys = await pq.Keys.ListAsync(new KeysListInput { Algorithm = "RSA", QuantumVulnerable = true });
+var keys = await pq.Keys.ListAsync(new KeyListOptions { Algorithm = "RSA", Risk = "High" });
 foreach (var k in keys.Data)
 {
-    Console.WriteLine($"{k.Provider}\t{k.Region}\t{k.KeyId}\t{k.Algorithm}");
+    Console.WriteLine($"{k.Provider}\t{k.Region}\t{k.ExternalId}\t{k.Algorithm}");
 }
+```
+
+## Hybrid signing and multicloud Vault
+
+```csharp
+await pq.Vault.PutSettingsAsync(new VaultSettingsInput
+{
+    DefaultKekProvider = "gcp-kms",
+    Gcp = new Dictionary<string, object?>
+    {
+        ["kekKeyName"] = "projects/acme/locations/global/keyRings/postq/cryptoKeys/vault-kek",
+        ["keyRingName"] = "projects/acme/locations/us-east1/keyRings/postq-signing",
+        ["protectionLevel"] = "HSM",
+    },
+});
+var key = await pq.HybridKeys.CreateAsync(new HybridKeyCreateInput
+{
+    Name = "release-signing",
+    Algorithm = "mldsa65+ecdsa-p256",
+    KekProvider = "gcp-kms",
+    KeyProvider = "gcp-kms",
+});
+var signature = await pq.SignAsync(new HybridSignInput
+{
+    KeyId = key.Id,
+    Payload = System.Text.Encoding.UTF8.GetBytes("release manifest"),
+});
 ```
 
 ## Configuration

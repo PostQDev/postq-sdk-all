@@ -209,3 +209,163 @@ def test_health_returns_status() -> None:
         status=200,
     )
     assert PostQ(api_key="pq_live_test").health()["status"] == "ok"
+
+
+# ── v0.6 contract surfaces ────────────────────────────────────────────────
+
+
+@responses.activate
+def test_run_cloud_scan() -> None:
+    responses.add(
+        responses.POST,
+        "https://api.postq.dev/v1/scans/cloud",
+        json={
+            "success": True,
+            "data": {
+                "id": "cloud-1",
+                "createdAt": "2026-07-16T00:00:00Z",
+                "provider": "aws",
+                "target": "123456789012",
+                "mode": "live",
+                "riskScore": 80,
+                "riskLevel": "Critical",
+                "findingsCount": 4,
+                "resourcesCount": 10,
+                "summary": {
+                    "totalEndpoints": 10,
+                    "quantumVulnerable": 4,
+                    "hybridEnabled": 0,
+                    "pqReady": 6,
+                },
+                "url": "https://app.postq.dev/scans/cloud-1",
+            },
+        },
+        status=201,
+    )
+    result = PostQ(api_key="pq_live_test").scans.run_cloud(
+        provider="aws",
+        target="123456789012",
+        aws={"regions": ["us-east-1"]},
+    )
+    assert result.provider == "aws"
+    assert result.summary.quantum_vulnerable == 4
+
+
+@responses.activate
+def test_hybrid_create_sends_multicloud_provider_fields() -> None:
+    responses.add(
+        responses.POST,
+        "https://api.postq.dev/v1/hybrid-keys",
+        json={
+            "success": True,
+            "data": {
+                "id": "key-1",
+                "name": "release",
+                "algorithm": "mldsa65+ecdsa-p256",
+                "createdAt": "2026-07-16T00:00:00Z",
+                "publicKey": "{}",
+            },
+        },
+        status=201,
+    )
+    PostQ(api_key="pq_live_test").hybrid_keys.create(
+        name="release",
+        algorithm="mldsa65+ecdsa-p256",
+        kek_provider="gcp-kms",
+        key_provider="gcp-kms",
+    )
+    body = responses.calls[0].request.body
+    assert b'"kekProvider": "gcp-kms"' in body
+    assert b'"keyProvider": "gcp-kms"' in body
+
+
+@responses.activate
+def test_policy_maps_enforcement_contract() -> None:
+    policy = {
+        "id": "policy-1",
+        "name": "production hybrid",
+        "description": "Require hybrid",
+        "action": "enforce",
+        "enabled": True,
+        "environments": ["production"],
+        "rule": {
+            "matchOperation": "sign",
+            "algorithmIn": None,
+            "algorithmNotIn": None,
+            "requireHybrid": True,
+            "minPqLevel": 3,
+        },
+        "createdAt": "2026-07-16T00:00:00Z",
+        "updatedAt": "2026-07-16T00:00:00Z",
+    }
+    responses.add(
+        responses.GET,
+        "https://api.postq.dev/v1/policies",
+        json={"success": True, "data": [policy]},
+    )
+    result = PostQ(api_key="pq_live_test").policies.list()[0]
+    assert result.action == "enforce"
+    assert result.environments == ["production"]
+    assert result.rule.require_hybrid is True
+
+
+@responses.activate
+def test_ledger_maps_hash_chain_and_seal_contract() -> None:
+    responses.add(
+        responses.GET,
+        "https://api.postq.dev/v1/ledger/entries",
+        json={
+            "success": True,
+            "data": [{
+                "id": "entry-1",
+                "seq": 0,
+                "prevHashHex": "00",
+                "entryHashHex": "11",
+                "payload": {"name": "release"},
+                "eventType": "custom.event",
+                "subjectId": None,
+                "actorId": None,
+                "createdAt": "2026-07-16T00:00:00Z",
+            }],
+            "pagination": {"limit": 100, "nextCursor": None},
+        },
+    )
+    responses.add(
+        responses.POST,
+        "https://api.postq.dev/v1/ledger/seal",
+        json={
+            "success": True,
+            "data": {
+                "treeSize": 1,
+                "merkleRootHex": "aa",
+                "signatureBase64": "c2ln",
+                "signingKeyId": "key-1",
+                "createdAt": "2026-07-16T00:00:00Z",
+                "fresh": True,
+            },
+        },
+    )
+    pq = PostQ(api_key="pq_live_test")
+    page = pq.ledger.entries()
+    assert page[0].entry_hash_hex == "11"
+    seal = pq.ledger.seal()
+    assert seal.tree_size == 1
+    assert seal.fresh is True
+
+
+@responses.activate
+def test_vault_uses_default_provider_and_save_envelope() -> None:
+    responses.add(
+        responses.PUT,
+        "https://api.postq.dev/v1/vault/settings",
+        json={"success": True, "data": {"savedAt": "2026-07-16T00:00:00Z"}},
+    )
+    result = PostQ(api_key="pq_live_test").vault.put_settings(
+        default_kek_provider="gcp-kms",
+        gcp={
+            "kekKeyName": "projects/acme/locations/global/keyRings/postq/cryptoKeys/kek"
+        },
+    )
+    assert result.saved_at == "2026-07-16T00:00:00Z"
+    body = responses.calls[0].request.body
+    assert b'"defaultKekProvider": "gcp-kms"' in body

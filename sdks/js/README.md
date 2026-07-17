@@ -43,15 +43,23 @@ console.log(detail.hndl?.severity, detail.certificate?.daysUntilExpiry);
 // Download the CycloneDX 1.6 CBOM for a scan
 const cbom = await pq.scans.cbom(result.id);            // parsed object
 const raw = await pq.scans.cbom(result.id, { raw: true }); // JSON string
+
+// Or ask the API to perform and persist a real scan
+const tls = await pq.scans.runUrl({ target: "example.com" });
+const aws = await pq.scans.runCloud({
+  provider: "aws",
+  target: "123456789012",
+  aws: { regions: ["us-east-1", "us-west-2"], roleArn: "arn:aws:iam::…:role/PostQScanner" },
+});
 ```
 
 ## Assets and keys (0.3.0+)
 
 ```ts
 // Browse your cryptographic inventory
-const assets = await pq.assets.list({ provider: "aws", risk: "high", limit: 50 });
+const assets = await pq.assets.list({ provider: "aws", risk: "HIGH", limit: 50 });
 for (const a of assets.data) {
-  console.log(a.name, a.algorithm, a.riskLevel);
+  console.log(a.name, a.algorithm, a.risk);
 }
 
 // Or stream every asset
@@ -60,10 +68,36 @@ for await (const a of pq.assets.iterAll({ environment: "production" })) {
 }
 
 // Browse keys discovered by cloud scans
-const keys = await pq.keys.list({ algorithm: "RSA", quantumVulnerable: true });
+const keys = await pq.keys.list({ algorithm: "RSA", risk: "High" });
 for (const k of keys.data) {
-  console.log(k.provider, k.region, k.keyId, k.algorithm);
+  console.log(k.provider, k.region, k.externalId, k.algorithm);
 }
+```
+
+## Hybrid signing and multicloud Vault
+
+```ts
+await pq.vault.putSettings({
+  defaultKekProvider: "gcp-kms",
+  gcp: {
+    kekKeyName: "projects/acme/locations/global/keyRings/postq/cryptoKeys/vault-kek",
+    keyRingName: "projects/acme/locations/us-east1/keyRings/postq-signing",
+    protectionLevel: "HSM",
+  },
+});
+
+const key = await pq.hybridKeys.create({
+  name: "release-signing",
+  algorithm: "mldsa65+ecdsa-p256",
+  kekProvider: "gcp-kms",
+  keyProvider: "gcp-kms",
+});
+const signature = await pq.sign({ keyId: key.id, payload: "release manifest" });
+const verdict = await pq.verify({
+  publicKey: key.publicKey,
+  payload: "release manifest",
+  signature: signature.signature,
+});
 ```
 
 ## Configuration
@@ -73,7 +107,12 @@ for (const k of keys.data) {
 | `apiKey`    | _required_               | `pq_live_…` from your PostQ dashboard       |
 | `baseUrl`   | `https://api.postq.dev`  | Override for staging or self-hosted         |
 | `timeoutMs` | `30000`                  | Per-request timeout                         |
+| `maxRetries`| `2`                      | Idempotent GET/PUT/DELETE retry count       |
 | `fetch`     | `globalThis.fetch`       | Pass a custom fetch (testing, polyfill)     |
+
+The SDK retries idempotent operations on transient network, 429, and selected
+5xx responses. It never automatically replays POST requests that create scans,
+keys, signatures, policies, or Ledger entries.
 
 ## Errors
 

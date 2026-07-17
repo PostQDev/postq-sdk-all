@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace PostQ;
@@ -77,6 +78,85 @@ public sealed class ScanSubmitResult
     [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
     /// <summary>Direct URL to the scan in the PostQ dashboard.</summary>
     [JsonPropertyName("url")] public required string Url { get; init; }
+}
+
+/// <summary>Options for an AWS server-side inventory scan.</summary>
+public sealed class CloudScanAwsOptions
+{
+    public IReadOnlyList<string>? Regions { get; init; }
+    public string? RoleArn { get; init; }
+    public string? ExternalId { get; init; }
+}
+
+/// <summary>Options for an Azure server-side inventory scan.</summary>
+public sealed class CloudScanAzureOptions
+{
+    public required string SubscriptionId { get; init; }
+    public string? TenantId { get; init; }
+    public string? ClientId { get; init; }
+    public string? ClientSecret { get; init; }
+    public IReadOnlyList<string>? VaultNames { get; init; }
+}
+
+/// <summary>Input for <see cref="ScansResource.RunCloudAsync"/>.</summary>
+public sealed class CloudScanInput
+{
+    public required string Provider { get; init; }
+    public required string Target { get; init; }
+    public CloudScanAwsOptions? Aws { get; init; }
+    public CloudScanAzureOptions? Azure { get; init; }
+}
+
+/// <summary>Aggregate counts returned by a server-side cloud scan.</summary>
+public sealed class CloudScanSummary
+{
+    public int TotalEndpoints { get; init; }
+    public int QuantumVulnerable { get; init; }
+    public int HybridEnabled { get; init; }
+    public int PqReady { get; init; }
+}
+
+/// <summary>Persisted result of a server-side cloud scan.</summary>
+public sealed class CloudScanResult
+{
+    public required string Id { get; init; }
+    public required string CreatedAt { get; init; }
+    public required string Provider { get; init; }
+    public required string Target { get; init; }
+    public required string Mode { get; init; }
+    public int RiskScore { get; init; }
+    public required string RiskLevel { get; init; }
+    public int FindingsCount { get; init; }
+    public int ResourcesCount { get; init; }
+    public required CloudScanSummary Summary { get; init; }
+    public required string Url { get; init; }
+}
+
+/// <summary>Input for <see cref="ScansResource.RunUrlAsync"/>.</summary>
+public sealed class UrlScanInput
+{
+    public required string Target { get; init; }
+    public int? TimeoutMs { get; init; }
+}
+
+/// <summary>Rich persisted result of a server-side URL scan.</summary>
+public sealed class UrlScanResult
+{
+    public required string Id { get; init; }
+    public required string CreatedAt { get; init; }
+    public required string Target { get; init; }
+    public required string Mode { get; init; }
+    public int RiskScore { get; init; }
+    public required string RiskLevel { get; init; }
+    public int FindingsCount { get; init; }
+    public JsonElement Summary { get; init; }
+    public Dictionary<string, string> Metadata { get; init; } = new();
+    public IReadOnlyList<ScanFindingRow> Findings { get; init; } = Array.Empty<ScanFindingRow>();
+    public CertificateInfo? Certificate { get; init; }
+    public TlsInfo? Tls { get; init; }
+    public HndlAssessment? Hndl { get; init; }
+    public long ScanDurationMs { get; init; }
+    public required string Url { get; init; }
 }
 
 /// <summary>A single row returned by <see cref="ScansResource.ListAsync"/>.</summary>
@@ -424,6 +504,14 @@ public sealed class HybridKeyCreateInput
     public required string Name { get; init; }
     /// <summary>Defaults to <c>mldsa65+ed25519</c>.</summary>
     public string Algorithm { get; init; } = "mldsa65+ed25519";
+    /// <summary>env | aws-kms | azure-kv | gcp-kms.</summary>
+    public string? KekProvider { get; init; }
+    /// <summary>postq-managed | aws-kms | azure-kv | gcp-kms.</summary>
+    public string KeyProvider { get; init; } = "postq-managed";
+    /// <summary>Where the ML-DSA half lives.</summary>
+    public string PqProvider { get; init; } = "postq-managed";
+    /// <summary>Required for enclave-backed PQ providers.</summary>
+    public string? AttestationPolicyId { get; init; }
     /// <summary>Free-form metadata stored alongside the key.</summary>
     public Dictionary<string, object?>? Metadata { get; init; }
 }
@@ -510,12 +598,12 @@ public sealed class HybridVerifyResult
 public sealed class HybridKeyAuditEntry
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
-    [JsonPropertyName("seq")] public required long Seq { get; init; }
-    [JsonPropertyName("eventType")] public required string EventType { get; init; }
+    [JsonPropertyName("operation")] public required string Operation { get; init; }
+    [JsonPropertyName("payloadSha256")] public required string PayloadSha256 { get; init; }
+    [JsonPropertyName("payloadSize")] public required long PayloadSize { get; init; }
+    [JsonPropertyName("verified")] public bool? Verified { get; init; }
+    [JsonPropertyName("metadata")] public Dictionary<string, object?>? Metadata { get; init; }
     [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
-    [JsonPropertyName("actor")] public string? Actor { get; init; }
-    [JsonPropertyName("subjectId")] public string? SubjectId { get; init; }
-    [JsonPropertyName("data")] public Dictionary<string, object?>? Data { get; init; }
 }
 
 /// <summary>Response from <see cref="HybridKeysResource.GetAuditAsync"/>.</summary>
@@ -530,15 +618,11 @@ public sealed class HybridKeyAuditResult
 /// <summary>The typed rule body of a policy.</summary>
 public sealed class PolicyRule
 {
-    /// <summary>One or more of: sign | verify | create_key | revoke_key | rotate_key.</summary>
-    [JsonPropertyName("operations")] public required IReadOnlyList<string> Operations { get; init; }
-    /// <summary>allow | deny | require_approval.</summary>
-    [JsonPropertyName("action")] public required string Action { get; init; }
-    [JsonPropertyName("algorithms")] public IReadOnlyList<string>? Algorithms { get; init; }
-    [JsonPropertyName("keyIds")] public IReadOnlyList<string>? KeyIds { get; init; }
-    [JsonPropertyName("maxPayloadBytes")] public long? MaxPayloadBytes { get; init; }
-    [JsonPropertyName("requireMetadataKeys")] public IReadOnlyList<string>? RequireMetadataKeys { get; init; }
-    [JsonPropertyName("message")] public string? Message { get; init; }
+    [JsonPropertyName("matchOperation")] public string MatchOperation { get; init; } = "*";
+    [JsonPropertyName("algorithmIn")] public IReadOnlyList<string>? AlgorithmIn { get; init; }
+    [JsonPropertyName("algorithmNotIn")] public IReadOnlyList<string>? AlgorithmNotIn { get; init; }
+    [JsonPropertyName("requireHybrid")] public bool RequireHybrid { get; init; }
+    [JsonPropertyName("minPqLevel")] public int? MinPqLevel { get; init; }
 }
 
 /// <summary>An org-level policy rule enforced by <c>POST /v1/sign</c>.</summary>
@@ -547,7 +631,9 @@ public sealed class Policy
     [JsonPropertyName("id")] public required string Id { get; init; }
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("action")] public required string Action { get; init; }
     [JsonPropertyName("enabled")] public required bool Enabled { get; init; }
+    [JsonPropertyName("environments")] public IReadOnlyList<string> Environments { get; init; } = Array.Empty<string>();
     [JsonPropertyName("rule")] public required PolicyRule Rule { get; init; }
     [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
     [JsonPropertyName("updatedAt")] public required string UpdatedAt { get; init; }
@@ -558,7 +644,9 @@ public sealed class PolicyCreateInput
 {
     [JsonPropertyName("name")] public required string Name { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("action")] public required string Action { get; init; }
     [JsonPropertyName("enabled")] public bool Enabled { get; init; } = true;
+    [JsonPropertyName("environments")] public IReadOnlyList<string> Environments { get; init; } = Array.Empty<string>();
     [JsonPropertyName("rule")] public required PolicyRule Rule { get; init; }
 }
 
@@ -567,7 +655,9 @@ public sealed class PolicyUpdateInput
 {
     [JsonPropertyName("name")] public string? Name { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("action")] public string? Action { get; init; }
     [JsonPropertyName("enabled")] public bool? Enabled { get; init; }
+    [JsonPropertyName("environments")] public IReadOnlyList<string>? Environments { get; init; }
     [JsonPropertyName("rule")] public PolicyRule? Rule { get; init; }
 }
 
@@ -578,44 +668,46 @@ public sealed class LedgerEntry
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
     [JsonPropertyName("seq")] public required long Seq { get; init; }
+    [JsonPropertyName("prevHashHex")] public required string PrevHashHex { get; init; }
+    [JsonPropertyName("entryHashHex")] public required string EntryHashHex { get; init; }
+    [JsonPropertyName("payload")] public Dictionary<string, object?>? Payload { get; init; }
     [JsonPropertyName("eventType")] public required string EventType { get; init; }
-    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
-    [JsonPropertyName("prevHash")] public string? PrevHash { get; init; }
-    [JsonPropertyName("leafHash")] public string? LeafHash { get; init; }
-    [JsonPropertyName("actor")] public string? Actor { get; init; }
     [JsonPropertyName("subjectId")] public string? SubjectId { get; init; }
-    [JsonPropertyName("data")] public Dictionary<string, object?>? Data { get; init; }
+    [JsonPropertyName("actorId")] public string? ActorId { get; init; }
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
 }
 
 /// <summary>A signed Merkle-root checkpoint over a range of ledger entries.</summary>
 public sealed class LedgerCheckpoint
 {
     [JsonPropertyName("id")] public required string Id { get; init; }
-    [JsonPropertyName("seq")] public required long Seq { get; init; }
-    [JsonPropertyName("merkleRoot")] public required string MerkleRoot { get; init; }
-    [JsonPropertyName("entriesCount")] public long EntriesCount { get; init; }
-    [JsonPropertyName("signedAt")] public required string SignedAt { get; init; }
-    [JsonPropertyName("signingKeyId")] public string? SigningKeyId { get; init; }
-    [JsonPropertyName("signature")] public string? Signature { get; init; }
-    [JsonPropertyName("algorithm")] public string? Algorithm { get; init; }
+    [JsonPropertyName("treeSize")] public required long TreeSize { get; init; }
+    [JsonPropertyName("merkleRootHex")] public required string MerkleRootHex { get; init; }
+    [JsonPropertyName("signatureBase64")] public required string SignatureBase64 { get; init; }
+    [JsonPropertyName("signingKeyId")] public required string SigningKeyId { get; init; }
+    [JsonPropertyName("publishedTo")] public IReadOnlyList<string> PublishedTo { get; init; } = Array.Empty<string>();
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
 }
 
 /// <summary>A Merkle inclusion proof for a single ledger entry.</summary>
 public sealed class LedgerInclusionProof
 {
     [JsonPropertyName("entryId")] public required string EntryId { get; init; }
-    [JsonPropertyName("seq")] public required long Seq { get; init; }
-    [JsonPropertyName("leafHash")] public required string LeafHash { get; init; }
-    [JsonPropertyName("merklePath")] public required IReadOnlyList<string> MerklePath { get; init; }
-    [JsonPropertyName("checkpoint")] public required LedgerCheckpoint Checkpoint { get; init; }
+    [JsonPropertyName("leafIndex")] public required long LeafIndex { get; init; }
+    [JsonPropertyName("leafHashHex")] public required string LeafHashHex { get; init; }
+    [JsonPropertyName("proofHex")] public required IReadOnlyList<string> ProofHex { get; init; }
+    [JsonPropertyName("checkpoint")] public required JsonElement Checkpoint { get; init; }
 }
 
 /// <summary>Returned by <see cref="LedgerResource.SealAsync"/>.</summary>
 public sealed class LedgerSealResult
 {
-    [JsonPropertyName("checkpoint")] public LedgerCheckpoint? Checkpoint { get; init; }
-    [JsonPropertyName("sealed")] public bool Sealed { get; init; }
-    [JsonPropertyName("entriesCovered")] public long EntriesCovered { get; init; }
+    [JsonPropertyName("treeSize")] public long TreeSize { get; init; }
+    [JsonPropertyName("merkleRootHex")] public required string MerkleRootHex { get; init; }
+    [JsonPropertyName("signatureBase64")] public required string SignatureBase64 { get; init; }
+    [JsonPropertyName("signingKeyId")] public required string SigningKeyId { get; init; }
+    [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
+    [JsonPropertyName("fresh")] public bool Fresh { get; init; }
 }
 
 /// <summary>Input for <see cref="LedgerResource.AppendAsync"/>.</summary>
@@ -630,12 +722,12 @@ public sealed class LedgerAppendInput
 /// <summary>A verifiable bundle returned by <see cref="LedgerResource.BundleAsync"/>.</summary>
 public sealed class LedgerBundle
 {
-    [JsonPropertyName("version")] public required string Version { get; init; }
-    [JsonPropertyName("org")] public Dictionary<string, object?>? Org { get; init; }
+    [JsonPropertyName("version")] public int Version { get; init; }
+    [JsonPropertyName("org")] public required string Org { get; init; }
     [JsonPropertyName("generatedAt")] public required string GeneratedAt { get; init; }
-    [JsonPropertyName("entries")] public required IReadOnlyList<LedgerEntry> Entries { get; init; }
-    [JsonPropertyName("checkpoints")] public required IReadOnlyList<LedgerCheckpoint> Checkpoints { get; init; }
-    [JsonPropertyName("signingKeys")] public IReadOnlyList<Dictionary<string, object?>>? SigningKeys { get; init; }
+    [JsonPropertyName("entries")] public required IReadOnlyList<JsonElement> Entries { get; init; }
+    [JsonPropertyName("checkpoints")] public required IReadOnlyList<JsonElement> Checkpoints { get; init; }
+    [JsonPropertyName("signingKeys")] public IReadOnlyList<JsonElement>? SigningKeys { get; init; }
 }
 
 /// <summary>Response from <see cref="LedgerResource.EntriesAsync"/>.</summary>
@@ -658,18 +750,25 @@ public sealed class LedgerCheckpointListResult
 /// The encrypted secret is never returned in plaintext.</summary>
 public sealed class VaultSettings
 {
-    /// <summary>env | aws-kms | azure-kv.</summary>
-    [JsonPropertyName("kekProvider")] public required string KekProvider { get; init; }
+    /// <summary>env | aws-kms | azure-kv | gcp-kms.</summary>
+    [JsonPropertyName("defaultKekProvider")] public required string DefaultKekProvider { get; init; }
     [JsonPropertyName("aws")] public Dictionary<string, object?>? Aws { get; init; }
     [JsonPropertyName("azure")] public Dictionary<string, object?>? Azure { get; init; }
-    [JsonPropertyName("configuredAt")] public string? ConfiguredAt { get; init; }
+    [JsonPropertyName("gcp")] public Dictionary<string, object?>? Gcp { get; init; }
     [JsonPropertyName("updatedAt")] public string? UpdatedAt { get; init; }
 }
 
 /// <summary>Input for <see cref="VaultResource.PutSettingsAsync"/>.</summary>
 public sealed class VaultSettingsInput
 {
-    [JsonPropertyName("kekProvider")] public required string KekProvider { get; init; }
+    [JsonPropertyName("defaultKekProvider")] public required string DefaultKekProvider { get; init; }
     [JsonPropertyName("aws")] public Dictionary<string, object?>? Aws { get; init; }
     [JsonPropertyName("azure")] public Dictionary<string, object?>? Azure { get; init; }
+    [JsonPropertyName("gcp")] public Dictionary<string, object?>? Gcp { get; init; }
+}
+
+/// <summary>Result returned after Vault settings are persisted.</summary>
+public sealed class VaultSettingsSaveResult
+{
+    [JsonPropertyName("savedAt")] public required string SavedAt { get; init; }
 }

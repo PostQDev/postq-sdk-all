@@ -13,17 +13,20 @@ These wrap the [PostQ REST API](https://api.postq.dev) — submit quantum-risk s
 All three expose the same surface, idiomatic to each language:
 
 - `pq.scans.submit({...})` → `POST /v1/scans`
+- `pq.scans.runCloud(...)` / `run_cloud(...)` / `RunCloudAsync(...)` → live `POST /v1/scans/cloud`
+- `pq.scans.runUrl(...)` / `run_url(...)` / `RunUrlAsync(...)` → live `POST /v1/scans/url`
 - `pq.scans.list({limit})` → `GET /v1/scans` — returns one page (`data` + `pagination`)
 - `pq.scans.iter_all()` / `iterAll()` / `IterAllAsync()` — auto-paginated stream
 - `pq.assets.list({...})` → `GET /v1/assets` (cryptographic inventory, **0.3.0+**)
 - `pq.keys.list({...})` → `GET /v1/keys` (key inventory, **0.3.0+**)
 - `pq.assets.iter_all()` / `pq.keys.iter_all()` and equivalents — auto-paginated
 - `pq.health()` → `GET /health`
+- hybrid key lifecycle, Policies, Ledger proofs/bundles, and Vault settings
+- multicloud Vault providers: AWS KMS, Azure Key Vault, and Google Cloud KMS
 
-> **Cloud KMS scans** (`POST /v1/scans/cloud`) are available today through the
-> [`postq` CLI](https://github.com/PostQDev/postq-cli) (`postq scan cloud aws|azure`)
-> and the cloud agents. A first-class `submit_cloud` / `submitCloud` /
-> `SubmitCloudAsync` SDK helper is on the roadmap.
+SDK-triggered cloud scans are useful for automation. For strict isolation,
+deploy the push-mode AWS/Azure scanners or Kubernetes Helm agent so customer
+credentials and raw inventory remain inside the customer environment.
 
 The full machine-readable API contract lives in [`postq-site/apps/api/openapi.yaml`](https://github.com/PostQDev/postq-site/blob/main/apps/api/openapi.yaml).
 

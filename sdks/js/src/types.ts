@@ -24,6 +24,8 @@ export interface PostQOptions {
   baseUrl?: string;
   /** Request timeout in milliseconds. Defaults to 30000. */
   timeoutMs?: number;
+  /** Retries for idempotent requests on 429/5xx/network failure. Defaults to 2. */
+  maxRetries?: number;
   /** Custom fetch implementation. Defaults to globalThis.fetch. */
   fetch?: typeof fetch;
 }
@@ -89,6 +91,73 @@ export interface Pagination {
 export interface ScanListResult {
   data: ScanListItem[];
   pagination: Pagination;
+}
+
+/* ─────────────────────── Server-side scan execution ─────────────────────── */
+
+export interface CloudScanAwsOptions {
+  regions?: string[];
+  roleArn?: string;
+  externalId?: string;
+}
+
+export interface CloudScanAzureOptions {
+  subscriptionId: string;
+  tenantId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  vaultNames?: string[];
+}
+
+export interface CloudScanInput {
+  provider: "aws" | "azure";
+  target: string;
+  aws?: CloudScanAwsOptions;
+  azure?: CloudScanAzureOptions;
+}
+
+export interface CloudScanSummary {
+  totalEndpoints: number;
+  quantumVulnerable: number;
+  hybridEnabled: number;
+  pqReady: number;
+}
+
+export interface CloudScanResult {
+  id: string;
+  createdAt: string;
+  provider: CloudScanInput["provider"];
+  target: string;
+  mode: "live" | "mock";
+  riskScore: number;
+  riskLevel: RiskLevel;
+  findingsCount: number;
+  resourcesCount: number;
+  summary: CloudScanSummary;
+  url: string;
+}
+
+export interface UrlScanInput {
+  target: string;
+  timeoutMs?: number;
+}
+
+export interface UrlScanResult {
+  id: string;
+  createdAt: string;
+  target: string;
+  mode: "live" | "mock";
+  riskScore: number;
+  riskLevel: RiskLevel;
+  findingsCount: number;
+  summary: ScanSummary;
+  metadata: Record<string, string>;
+  findings: ScanFindingRow[];
+  certificate: CertificateInfo | null;
+  tls: TlsInfo | null;
+  hndl: HndlAssessment | null;
+  scanDurationMs: number;
+  url: string;
 }
 
 /* ────────────────────────────── Scan detail ────────────────────────────── */
@@ -306,10 +375,14 @@ export type HybridAlgorithm =
   | "mldsa87+ecdsa-p256";
 
 /** KEK provider — who wraps the data-encryption key that seals private bytes. */
-export type KekProvider = "env" | "aws-kms" | "azure-kv";
+export type KekProvider = "env" | "aws-kms" | "azure-kv" | "gcp-kms";
 
 /** Where the classical signing-key half lives. */
-export type KeyHolderProvider = "postq-managed" | "aws-kms" | "azure-kv";
+export type KeyHolderProvider =
+  | "postq-managed"
+  | "aws-kms"
+  | "azure-kv"
+  | "gcp-kms";
 
 /** Where the post-quantum signing-key half lives. */
 export type PqProvider =
@@ -533,6 +606,7 @@ export interface LedgerSealResult {
   signatureBase64: string;
   signingKeyId: string;
   createdAt: string;
+  fresh: boolean;
 }
 
 export interface LedgerAppendInput {
@@ -601,10 +675,17 @@ export interface VaultSettingsAzure {
   clientSecretConfigured?: boolean;
 }
 
+export interface VaultSettingsGcp {
+  kekKeyName: string;
+  keyRingName?: string | null;
+  protectionLevel: "SOFTWARE" | "HSM";
+}
+
 export interface VaultSettings {
   defaultKekProvider: KekProvider;
   aws: VaultSettingsAws | null;
   azure: VaultSettingsAzure | null;
+  gcp: VaultSettingsGcp | null;
   updatedAt: string;
 }
 
@@ -624,6 +705,19 @@ export interface VaultSettingsInput {
     /** Provide once; encrypted server-side and never echoed. */
     clientSecret?: string;
   };
+  gcp?: {
+    kekKeyName: string;
+    keyRingName?: string;
+    protectionLevel?: "SOFTWARE" | "HSM";
+  };
+}
+
+export interface VaultSettingsSaveResult {
+  savedAt: string;
+}
+
+export interface VaultSettingsClearResult {
+  cleared: true;
 }
 
 /* ─────────────────────── Attestation policies ─────────────────────── */

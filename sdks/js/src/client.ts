@@ -15,6 +15,10 @@ import {
   ScanSubmitInput,
   ScanSubmitResult,
   ScanDetail,
+  CloudScanInput,
+  CloudScanResult,
+  UrlScanInput,
+  UrlScanResult,
   Asset,
   AssetListOptions,
   AssetListResult,
@@ -45,6 +49,8 @@ import {
   LedgerBundle,
   VaultSettings,
   VaultSettingsInput,
+  VaultSettingsSaveResult,
+  VaultSettingsClearResult,
   AttestationPolicy,
   AttestationPolicyCreateInput,
   AttestationPolicyListOptions,
@@ -53,7 +59,7 @@ import {
 } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.postq.dev";
-const SDK_VERSION = "0.5.0";
+const SDK_VERSION = "0.6.0";
 
 /**
  * PostQ SDK client.
@@ -89,6 +95,7 @@ export class PostQ {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly maxRetries: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: PostQOptions) {
@@ -100,6 +107,10 @@ export class PostQ {
     this.apiKey = options.apiKey.trim();
     this.baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
     this.timeoutMs = options.timeoutMs ?? 30000;
+    this.maxRetries = options.maxRetries ?? 2;
+    if (!Number.isInteger(this.maxRetries) || this.maxRetries < 0 || this.maxRetries > 10) {
+      throw new PostQConfigError("maxRetries must be an integer between 0 and 10");
+    }
 
     const f = options.fetch ?? globalThis.fetch;
     if (typeof f !== "function") {
@@ -153,33 +164,51 @@ export class PostQ {
       }
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url.toString(), {
-        method,
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          Accept: "application/json",
-          "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
-        },
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const e = err as { name?: string; message?: string };
-      if (e.name === "AbortError") {
-        throw new PostQNetworkError(
-          `${method} ${path} timed out after ${this.timeoutMs}ms`,
-        );
+    const canRetry = method === "GET" || method === "PUT" || method === "DELETE";
+    let response: Response | undefined;
+    for (let attempt = 0; attempt <= (canRetry ? this.maxRetries : 0); attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        response = await this.fetchImpl(url.toString(), {
+          method,
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
+          },
+          body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+          signal: controller.signal,
+        });
+      } catch (err) {
+        const e = err as { name?: string; message?: string };
+        if (!canRetry || attempt === this.maxRetries) {
+          if (e.name === "AbortError") {
+            throw new PostQNetworkError(
+              `${method} ${path} timed out after ${this.timeoutMs}ms`,
+            );
+          }
+          throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
+        }
+        await retryDelay(attempt);
+        continue;
+      } finally {
+        clearTimeout(timer);
       }
-      throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
-    } finally {
-      clearTimeout(timer);
+      if (
+        attempt < this.maxRetries &&
+        canRetry &&
+        isRetryableStatus(response.status)
+      ) {
+        const retryAfter = response.headers?.get?.("retry-after") ?? null;
+        await response.body?.cancel().catch(() => undefined);
+        await retryDelay(attempt, retryAfter);
+        continue;
+      }
+      break;
     }
+    if (!response) throw new PostQNetworkError(`${method} ${path}: no response`);
 
     const text = await response.text();
     let json: unknown;
@@ -230,34 +259,53 @@ export class PostQ {
         if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
       }
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url.toString(), {
-        method,
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          Accept: "*/*",
-          "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
-        },
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const e = err as { name?: string; message?: string };
-      if (e.name === "AbortError") {
-        throw new PostQNetworkError(`${method} ${path} timed out after ${this.timeoutMs}ms`);
+    const canRetry = method === "GET" || method === "DELETE";
+    let response: Response | undefined;
+    for (let attempt = 0; attempt <= (canRetry ? this.maxRetries : 0); attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+      try {
+        response = await this.fetchImpl(url.toString(), {
+          method,
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            Accept: "*/*",
+            "User-Agent": `postq-sdk-js/${SDK_VERSION}`,
+          },
+          signal: controller.signal,
+        });
+      } catch (err) {
+        const e = err as { name?: string; message?: string };
+        if (!canRetry || attempt === this.maxRetries) {
+          if (e.name === "AbortError") {
+            throw new PostQNetworkError(`${method} ${path} timed out after ${this.timeoutMs}ms`);
+          }
+          throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
+        }
+        await retryDelay(attempt);
+        continue;
+      } finally {
+        clearTimeout(timer);
       }
-      throw new PostQNetworkError(`${method} ${path}: ${e.message ?? String(err)}`);
-    } finally {
-      clearTimeout(timer);
+      if (
+        canRetry &&
+        attempt < this.maxRetries &&
+        isRetryableStatus(response.status)
+      ) {
+        const retryAfter = response.headers?.get?.("retry-after") ?? null;
+        await response.body?.cancel().catch(() => undefined);
+        await retryDelay(attempt, retryAfter);
+        continue;
+      }
+      break;
     }
+    if (!response) throw new PostQNetworkError(`${method} ${path}: no response`);
     const text = await response.text();
     if (!response.ok) {
       const message = text ? text.slice(0, 500) : `HTTP ${response.status}`;
       switch (response.status) {
         case 401: throw new PostQAuthError(message);
-        case 404: throw new PostQError(message, { status: 404 });
+        case 404: throw new PostQNotFoundError(message);
         default:
           if (response.status >= 500) {
             throw new PostQServerError(message, response.status);
@@ -267,6 +315,25 @@ export class PostQ {
     }
     return text;
   }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status === 500 ||
+    status === 502 || status === 503 || status === 504;
+}
+
+async function retryDelay(attempt: number, retryAfter?: string | null): Promise<void> {
+  let delayMs = Math.min(4_000, 250 * 2 ** attempt);
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      delayMs = Math.min(30_000, seconds * 1_000);
+    } else {
+      const dateMs = Date.parse(retryAfter);
+      if (Number.isFinite(dateMs)) delayMs = Math.min(30_000, Math.max(0, dateMs - Date.now()));
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 /**
@@ -313,6 +380,26 @@ export class ScansResource {
       success: boolean;
       data: ScanDetail;
     }>("GET", `/v1/scans/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  /** `POST /v1/scans/url` — run the TLS/HNDL scanner in the PostQ API and
+   * persist the result before returning it. */
+  async runUrl(input: UrlScanInput): Promise<UrlScanResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: UrlScanResult;
+    }>("POST", "/v1/scans/url", { body: input });
+    return envelope.data;
+  }
+
+  /** `POST /v1/scans/cloud` — run a server-side AWS, Azure, or Kubernetes
+   * inventory scan. For customer-hosted push mode, use the deployment agents. */
+  async runCloud(input: CloudScanInput): Promise<CloudScanResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: CloudScanResult;
+    }>("POST", "/v1/scans/cloud", { body: input });
     return envelope.data;
   }
 
@@ -552,11 +639,17 @@ export class HybridKeysResource {
 }
 
 function encodeBase64(payload: Uint8Array | string): string {
-  if (typeof payload === "string") {
-    // Assume UTF-8 text; if the caller already has base64 they should pass bytes.
-    return Buffer.from(payload, "utf8").toString("base64");
+  const bytes =
+    typeof payload === "string" ? new TextEncoder().encode(payload) : payload;
+  if (typeof globalThis.btoa === "function") {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return globalThis.btoa(binary);
   }
-  return Buffer.from(payload).toString("base64");
+  return Buffer.from(bytes).toString("base64");
 }
 
 /**
@@ -722,8 +815,11 @@ export class VaultResource {
   }
 
   /** `PUT /v1/vault/settings` — set or update KMS settings for the org. */
-  async putSettings(input: VaultSettingsInput): Promise<VaultSettings> {
-    const envelope = await this.client.request<{ success: boolean; data: VaultSettings }>(
+  async putSettings(input: VaultSettingsInput): Promise<VaultSettingsSaveResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: VaultSettingsSaveResult;
+    }>(
       "PUT",
       "/v1/vault/settings",
       { body: input },
@@ -732,8 +828,11 @@ export class VaultResource {
   }
 
   /** `DELETE /v1/vault/settings` — clear vault settings (revert to env-managed KEK). */
-  async clearSettings(): Promise<{ deleted: true }> {
-    const envelope = await this.client.request<{ success: boolean; data: { deleted: true } }>(
+  async clearSettings(): Promise<VaultSettingsClearResult> {
+    const envelope = await this.client.request<{
+      success: boolean;
+      data: VaultSettingsClearResult;
+    }>(
       "DELETE",
       "/v1/vault/settings",
     );

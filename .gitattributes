@@ -1,0 +1,2 @@
+*.csproj text eol=crlf whitespace=cr-at-eol
+*.slnx text eol=crlf whitespace=cr-at-eol

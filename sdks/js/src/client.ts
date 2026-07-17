@@ -649,7 +649,23 @@ function encodeBase64(payload: Uint8Array | string): string {
     }
     return globalThis.btoa(binary);
   }
-  return Buffer.from(bytes).toString("base64");
+  const alphabet =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let encoded = "";
+  for (let offset = 0; offset < bytes.length; offset += 3) {
+    const first = bytes[offset]!;
+    const hasSecond = offset + 1 < bytes.length;
+    const hasThird = offset + 2 < bytes.length;
+    const second = hasSecond ? bytes[offset + 1]! : 0;
+    const third = hasThird ? bytes[offset + 2]! : 0;
+    encoded += alphabet[first >> 2]!;
+    encoded += alphabet[((first & 0x03) << 4) | (second >> 4)]!;
+    encoded += hasSecond
+      ? alphabet[((second & 0x0f) << 2) | (third >> 6)]!
+      : "=";
+    encoded += hasThird ? alphabet[third & 0x3f]! : "=";
+  }
+  return encoded;
 }
 
 /**

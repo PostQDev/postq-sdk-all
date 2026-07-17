@@ -203,6 +203,39 @@ describe("hybrid payload encoding", () => {
       Buffer.from("héllo", "utf8").toString("base64"),
     );
   });
+
+  it("base64-encodes without btoa or Buffer in the SDK runtime", async () => {
+    const originalBtoa = globalThis.btoa;
+    Object.defineProperty(globalThis, "btoa", {
+      configurable: true,
+      value: undefined,
+    });
+    try {
+      const fetchMock = mockFetch({
+        success: true,
+        data: {
+          keyId: "00000000-0000-4000-8000-000000000001",
+          algorithm: "mldsa65+ed25519",
+          signature: "sig",
+          publicKey: "{}",
+          payloadSha256: "00",
+          payloadSize: 6,
+        },
+      });
+      const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+      await pq.sign({
+        keyId: "00000000-0000-4000-8000-000000000001",
+        payload: "héllo",
+      });
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(JSON.parse(init.body as string).payload).toBe("aMOpbGxv");
+    } finally {
+      Object.defineProperty(globalThis, "btoa", {
+        configurable: true,
+        value: originalBtoa,
+      });
+    }
+  });
 });
 
 describe("Vault settings", () => {

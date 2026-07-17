@@ -70,7 +70,8 @@ Each workflow verifies that the package version matches the tag before publishin
 
 - **npm**: configure Trusted Publishing for `@postq/sdk` with owner
     `PostQDev`, repository `postq-sdk-all`, and workflow `publish-npm.yml`. No
-    long-lived token is used.
+    GitHub environment is required; allow the `npm publish` action. No long-lived
+    token is used.
 - **PyPI**: configure Trusted Publishing for `postq-sdk` pointing at this repo + the `pypi` environment. No secret needed.
 - **NuGet**: create an API key scoped `PostQ.*` push; add as repo secret `NUGET_API_KEY`.
 

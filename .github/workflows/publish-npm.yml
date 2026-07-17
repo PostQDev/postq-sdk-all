@@ -3,8 +3,8 @@ name: Publish npm
 # Publishes @postq/sdk to npmjs.com when you push a tag like `js-v0.2.0`.
 # The tag version MUST match the version in sdks/js/package.json.
 #
-# Required repo secret: NPM_TOKEN (granular token scoped to @postq, or
-# Classic Automation token if your account requires 2FA on writes).
+# Auth: npm Trusted Publishing (OIDC, no long-lived token). Configure the
+# package publisher for PostQDev/postq-sdk-all + publish-npm.yml on npmjs.com.
 
 on:
   push:
@@ -29,13 +29,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
           cache-dependency-path: sdks/js/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Use npm with Trusted Publishing support
+        run: npm install --global npm@latest
 
       - name: Verify package.json version matches tag
         if: startsWith(github.ref, 'refs/tags/js-v')
@@ -55,5 +58,3 @@ jobs:
 
       - name: Publish to npm
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -356,6 +356,67 @@ class Asset:
     last_scanned: Optional[str] = None
     scan_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    workflow_status: Optional[str] = None
+    owner_team: Optional[str] = None
+    assigned_to: Optional[str] = None
+    criticality: str = "medium"
+    data_lifetime_years: Optional[int] = None
+    exposure: str = "unknown"
+    migration_due_at: Optional[str] = None
+    exception: Optional[Dict[str, Any]] = None
+
+
+@dataclass
+class MigrationAction:
+    id: str
+    project_id: str
+    title: str
+    provider: str
+    target_algorithm: str
+    execution_mode: str
+    status: str
+    asset_id: Optional[str] = None
+    source_algorithm: Optional[str] = None
+    assignee: Optional[str] = None
+    due_at: Optional[str] = None
+    before_scan_id: Optional[str] = None
+    after_scan_id: Optional[str] = None
+    downgrade_protected: Optional[bool] = None
+    dependent_credentials_rotated: bool = False
+    validation: Dict[str, Any] = field(default_factory=dict)
+    exception: Optional[Dict[str, Any]] = None
+    external_issue_url: Optional[str] = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class MigrationProject:
+    id: str
+    name: str
+    description: str
+    framework: str
+    track: str
+    status: str
+    target_date: Optional[str] = None
+    source_scan_id: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+    actions: list = field(default_factory=list)
+
+
+@dataclass
+class MigrationEvidenceBundle:
+    id: str
+    project_id: str
+    format: str
+    bundle: Dict[str, Any]
+    bundle_sha256: str
+    action_id: Optional[str] = None
+    ledger_entry_id: Optional[str] = None
+    checkpoint_id: Optional[str] = None
+    created_at: str = ""
 
 
 @dataclass

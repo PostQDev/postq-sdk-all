@@ -36,6 +36,9 @@ from .models import (
     LedgerEntry,
     LedgerInclusionProof,
     LedgerSealResult,
+    MigrationAction,
+    MigrationEvidenceBundle,
+    MigrationProject,
     Page,
     Pagination,
     Policy,
@@ -132,6 +135,7 @@ class PostQ:
         self.policies = PoliciesResource(self)
         self.ledger = LedgerResource(self)
         self.vault = VaultResource(self)
+        self.migrations = MigrationsResource(self)
 
     # ── public ──────────────────────────────────────────────────────────────
 
@@ -297,11 +301,12 @@ class ScansResource:
         target: str,
         aws: Optional[Mapping[str, Any]] = None,
         azure: Optional[Mapping[str, Any]] = None,
+        gcp: Optional[Mapping[str, Any]] = None,
     ) -> CloudScanResult:
         """``POST /v1/scans/cloud`` — run and persist a cloud inventory scan."""
-        if provider not in {"aws", "azure"}:
+        if provider not in {"aws", "azure", "gcp"}:
             raise PostQConfigError(
-                "provider must be 'aws' or 'azure'; Kubernetes uses the in-cluster agent"
+            "provider must be 'aws', 'azure', or 'gcp'; Kubernetes uses the in-cluster agent"
             )
         body = self._client._request(
             "POST",
@@ -312,6 +317,7 @@ class ScansResource:
                     "target": target,
                     "aws": dict(aws) if aws is not None else None,
                     "azure": dict(azure) if azure is not None else None,
+                    "gcp": dict(gcp) if gcp is not None else None,
                 }
             ),
         )
@@ -445,6 +451,82 @@ class AssetsResource:
                 return
 
 
+class MigrationsResource:
+    """Migration projects, actions, evidence bundles, and EO 14412 status."""
+
+    def __init__(self, client: PostQ) -> None:
+        self._client = client
+
+    def list(self) -> "list[MigrationProject]":
+        body = self._client._request("GET", "/v1/migrations")
+        return [_project_from_api(row) for row in body["data"]]
+
+    def create(
+        self,
+        *,
+        name: str,
+        description: str = "",
+        framework: str = "eo-14412",
+        track: str = "both",
+        target_date: Optional[str] = None,
+        source_scan_id: Optional[str] = None,
+        asset_ids: Optional[Sequence[str]] = None,
+        include_risk: Optional[Sequence[str]] = None,
+    ) -> MigrationProject:
+        body = self._client._request("POST", "/v1/migrations", json=_strip_none({
+            "name": name,
+            "description": description,
+            "framework": framework,
+            "track": track,
+            "targetDate": target_date,
+            "sourceScanId": source_scan_id,
+            "assetIds": list(asset_ids) if asset_ids is not None else None,
+            "includeRisk": list(include_risk) if include_risk is not None else None,
+        }))
+        return _project_from_api(body["data"])
+
+    def get(self, project_id: str) -> MigrationProject:
+        body = self._client._request("GET", f"/v1/migrations/{project_id}")
+        return _project_from_api(body["data"])
+
+    def update(
+        self,
+        project_id: str,
+        *,
+        status: Optional[str] = None,
+        target_date: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> MigrationProject:
+        body = self._client._request("PATCH", f"/v1/migrations/{project_id}", json=_strip_none({
+            "status": status, "targetDate": target_date, "description": description,
+        }))
+        return _project_from_api(body["data"])
+
+    def update_action(self, project_id: str, action_id: str, **update: Any) -> MigrationAction:
+        aliases = {
+            "due_at": "dueAt", "after_scan_id": "afterScanId",
+            "downgrade_protected": "downgradeProtected",
+            "dependent_credentials_rotated": "dependentCredentialsRotated",
+            "external_issue_url": "externalIssueUrl",
+        }
+        payload = {aliases.get(key, key): value for key, value in update.items()}
+        body = self._client._request("PATCH", f"/v1/migrations/{project_id}/actions/{action_id}", json=payload)
+        return _action_from_api(body["data"])
+
+    def finalize_evidence(self, project_id: str, action_id: str) -> MigrationEvidenceBundle:
+        body = self._client._request("POST", f"/v1/migrations/{project_id}/actions/{action_id}/evidence")
+        data = body["data"]
+        return MigrationEvidenceBundle(
+            id=data["id"], project_id=data["projectId"], action_id=data.get("actionId"),
+            format=data["format"], bundle=dict(data.get("bundle") or {}),
+            bundle_sha256=data["bundleSha256"], ledger_entry_id=data.get("ledgerEntryId"),
+            checkpoint_id=data.get("checkpointId"), created_at=data.get("createdAt", ""),
+        )
+
+    def eo_14412(self) -> "dict[str, Any]":
+        return self._client._request("GET", "/v1/migrations/compliance/eo-14412")["data"]
+
+
 class KeysResource:
     """Operations under ``/v1/keys``."""
 
@@ -528,6 +610,37 @@ def _row_to_asset(row: Mapping[str, Any]) -> Asset:
         last_scanned=row.get("lastScanned"),
         scan_id=row.get("scanId"),
         metadata=dict(row.get("metadata") or {}),
+        workflow_status=row.get("workflowStatus"),
+        owner_team=row.get("ownerTeam"),
+        assigned_to=row.get("assignedTo"),
+        criticality=str(row.get("criticality") or "medium"),
+        data_lifetime_years=row.get("dataLifetimeYears"),
+        exposure=str(row.get("exposure") or "unknown"),
+        migration_due_at=row.get("migrationDueAt"),
+        exception=row.get("exception"),
+    )
+
+
+def _action_from_api(data: Mapping[str, Any]) -> MigrationAction:
+    return MigrationAction(
+        id=data["id"], project_id=data["projectId"], asset_id=data.get("assetId"),
+        title=data["title"], provider=data["provider"], source_algorithm=data.get("sourceAlgorithm"),
+        target_algorithm=data["targetAlgorithm"], execution_mode=data["executionMode"], status=data["status"],
+        assignee=data.get("assignee"), due_at=data.get("dueAt"), before_scan_id=data.get("beforeScanId"),
+        after_scan_id=data.get("afterScanId"), downgrade_protected=data.get("downgradeProtected"),
+        dependent_credentials_rotated=bool(data.get("dependentCredentialsRotated", False)),
+        validation=dict(data.get("validation") or {}), exception=data.get("exception"),
+        external_issue_url=data.get("externalIssueUrl"), created_at=data.get("createdAt", ""), updated_at=data.get("updatedAt", ""),
+    )
+
+
+def _project_from_api(data: Mapping[str, Any]) -> MigrationProject:
+    return MigrationProject(
+        id=data["id"], name=data["name"], description=data.get("description", ""),
+        framework=data.get("framework", ""), track=data.get("track", "both"), status=data.get("status", "planned"),
+        target_date=data.get("targetDate"), source_scan_id=data.get("sourceScanId"),
+        metadata=dict(data.get("metadata") or {}), created_at=data.get("createdAt", ""), updated_at=data.get("updatedAt", ""),
+        actions=[_action_from_api(action) for action in data.get("actions", [])],
     )
 
 

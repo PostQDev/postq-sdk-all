@@ -10,6 +10,7 @@ export type ScanType =
   | "github"
   | "aws"
   | "azure"
+  | "gcp"
   | "kubernetes"
   | "bulk";
 
@@ -109,11 +110,16 @@ export interface CloudScanAzureOptions {
   vaultNames?: string[];
 }
 
+export interface CloudScanGcpOptions {
+  keyRingName: string;
+}
+
 export interface CloudScanInput {
-  provider: "aws" | "azure";
+  provider: "aws" | "azure" | "gcp";
   target: string;
   aws?: CloudScanAwsOptions;
   azure?: CloudScanAzureOptions;
+  gcp?: CloudScanGcpOptions;
 }
 
 export interface CloudScanSummary {
@@ -303,6 +309,14 @@ export interface Asset {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+  workflowStatus?: "discovered" | "assessed" | "planned" | "migrating" | "hybrid-enabled" | "pq-ready" | "deprecated" | "exception";
+  ownerTeam?: string | null;
+  assignedTo?: string | null;
+  criticality?: "low" | "medium" | "high" | "mission-critical";
+  dataLifetimeYears?: number | null;
+  exposure?: "internal" | "partner" | "internet" | "unknown";
+  migrationDueAt?: string | null;
+  exception?: Record<string, unknown> | null;
 }
 
 /** Filters for `assets.list()`. */
@@ -387,11 +401,54 @@ export type KeyHolderProvider =
 /** Where the post-quantum signing-key half lives. */
 export type PqProvider =
   | "postq-managed"
+  | "aws-kms"
+  | "gcp-kms"
   | "aws-cloudhsm"
   | "azure-managed-hsm"
   /** Phase-1 attested signing: the PQ half lives inside the postq-enclave
    *  mock backend and every sign returns an attestation doc. */
   | "enclave-mock";
+
+/* ─────────────────────────── Migrations ─────────────────────────── */
+
+export type MigrationActionStatus = "pending" | "ready" | "in-progress" | "validating" | "blocked" | "completed" | "waived";
+export interface MigrationAction {
+  id: string; projectId: string; assetId: string | null; title: string; provider: string;
+  sourceAlgorithm: string | null; targetAlgorithm: string; executionMode: "guided" | "native-provider" | "manual";
+  status: MigrationActionStatus; assignee: string | null; dueAt: string | null;
+  beforeScanId: string | null; afterScanId: string | null; downgradeProtected: boolean | null;
+  dependentCredentialsRotated: boolean; validation: Record<string, unknown>;
+  exception: Record<string, unknown> | null; externalIssueUrl: string | null; createdAt: string; updatedAt: string;
+}
+export interface MigrationProject {
+  id: string; name: string; description: string; framework: string;
+  track: "key-establishment" | "digital-signature" | "both";
+  status: "planned" | "active" | "blocked" | "completed" | "cancelled";
+  targetDate: string | null; sourceScanId: string | null; metadata: Record<string, unknown>;
+  createdAt: string; updatedAt: string; actionCount?: number;
+  actions?: MigrationAction[]; evidence?: MigrationEvidenceBundle[];
+}
+export interface MigrationUpdateInput {
+  status?: "planned" | "active" | "blocked" | "completed" | "cancelled";
+  targetDate?: string | null; description?: string;
+}
+export interface MigrationCreateInput {
+  name: string; description?: string; framework?: string;
+  track?: "key-establishment" | "digital-signature" | "both";
+  targetDate?: string; sourceScanId?: string; assetIds?: string[];
+  includeRisk?: Array<"CRITICAL" | "HIGH" | "MEDIUM" | "LOW">;
+}
+export interface MigrationEvidenceBundle {
+  id: string; projectId: string; actionId: string | null; format: "postq-migration-evidence/v1";
+  bundle: Record<string, unknown>; bundleSha256: string; ledgerEntryId: string | null;
+  checkpointId: string | null; createdAt: string;
+}
+export interface Eo14412Status {
+  framework: "EO-14412"; generatedAt: string;
+  deadlines: { keyEstablishment: "2030-12-31"; digitalSignatures: "2031-12-31" };
+  totals: { assets: number; pqReady: number; hybridEnabled: number; atRisk: number; exceptions: number };
+  readinessPercent: number;
+}
 
 /** A managed signing key owned by your org. */
 export interface HybridKey {

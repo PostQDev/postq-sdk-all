@@ -58,6 +58,26 @@ var aws = await pq.Scans.RunCloudAsync(new CloudScanInput
     Target = "123456789012",
     Aws = new CloudScanAwsOptions { Regions = new[] { "us-east-1" } },
 });
+var gcp = await pq.Scans.RunCloudAsync(new CloudScanInput
+{
+    Provider = "gcp",
+    Target = "projects/acme/locations/us-east1/keyRings/production",
+    Gcp = new CloudScanGcpOptions { KeyRingName = "projects/acme/locations/us-east1/keyRings/production" },
+});
+```
+
+## Migration control plane (0.7.0+)
+
+```csharp
+var project = await pq.Migrations.CreateAsync(new MigrationCreateInput
+{
+    Name = "EO 14412 migration",
+    Track = "both",
+    TargetDate = "2030-12-31",
+    IncludeRisk = new[] { "CRITICAL", "HIGH" },
+});
+await pq.Migrations.UpdateAsync(project.Id, new MigrationUpdateInput { Status = "active" });
+var status = await pq.Migrations.Eo14412Async();
 ```
 
 ## Assets and keys (0.3.0+)

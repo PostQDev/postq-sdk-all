@@ -8,6 +8,7 @@ export {
   LedgerResource,
   VaultResource,
   AttestationPoliciesResource,
+  MigrationsResource,
 } from "./client";
 export { verifyAttestationDoc } from "./attestation";
 export {
@@ -33,6 +34,7 @@ export type {
   ScanListResult,
   CloudScanAwsOptions,
   CloudScanAzureOptions,
+  CloudScanGcpOptions,
   CloudScanInput,
   CloudScanSummary,
   CloudScanResult,
@@ -105,4 +107,11 @@ export type {
   AttestationOutcome,
   AttestationVerifyInput,
   AttestationVerifyResult,
+  MigrationActionStatus,
+  MigrationAction,
+  MigrationProject,
+  MigrationCreateInput,
+  MigrationUpdateInput,
+  MigrationEvidenceBundle,
+  Eo14412Status,
 } from "./types";

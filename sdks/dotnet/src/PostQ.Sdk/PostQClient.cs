@@ -63,6 +63,9 @@ public sealed class PostQClient : IDisposable
     /// <summary>Operations under <c>/v1/vault</c>.</summary>
     public VaultResource Vault { get; }
 
+    /// <summary>Post-quantum migration projects, actions, and evidence.</summary>
+    public MigrationsResource Migrations { get; }
+
     /// <summary>Construct a new client.</summary>
     /// <param name="options">Required configuration. Must include an API key.</param>
     /// <param name="httpClient">
@@ -94,6 +97,7 @@ public sealed class PostQClient : IDisposable
         Policies = new PoliciesResource(this);
         Ledger = new LedgerResource(this);
         Vault = new VaultResource(this);
+        Migrations = new MigrationsResource(this);
     }
 
     /// <summary>Hit <c>GET /health</c>. Throws if the API is down.</summary>
@@ -329,10 +333,10 @@ public sealed class ScansResource
         CloudScanInput input,
         CancellationToken ct = default)
     {
-        if (input.Provider is not ("aws" or "azure"))
+        if (input.Provider is not ("aws" or "azure" or "gcp"))
         {
             throw new PostQConfigException(
-                "Provider must be 'aws' or 'azure'; Kubernetes uses the in-cluster agent.");
+            "Provider must be 'aws', 'azure', or 'gcp'; Kubernetes uses the in-cluster agent.");
         }
         var envelope = await _client
             .SendAsync<ApiEnvelope<CloudScanResult>>(
@@ -398,6 +402,57 @@ public sealed class AssetsResource
             if (string.IsNullOrEmpty(page.Pagination.NextCursor)) yield break;
             cursor = page.Pagination.NextCursor;
         }
+    }
+}
+
+/// <summary>Operations under <c>/v1/migrations</c>.</summary>
+public sealed class MigrationsResource
+{
+    private readonly PostQClient _client;
+    internal MigrationsResource(PostQClient client) => _client = client;
+
+    public async Task<IReadOnlyList<MigrationProject>> ListAsync(CancellationToken ct = default)
+    {
+        var envelope = await _client.SendAsync<ApiEnvelope<List<MigrationProject>>>(HttpMethod.Get, "/v1/migrations", null, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? new List<MigrationProject>();
+    }
+
+    public async Task<MigrationProject> CreateAsync(MigrationCreateInput input, CancellationToken ct = default)
+    {
+        var envelope = await _client.SendAsync<ApiEnvelope<MigrationProject>>(HttpMethod.Post, "/v1/migrations", input, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? throw new PostQException("API returned no migration project");
+    }
+
+    public async Task<MigrationProject> GetAsync(string id, CancellationToken ct = default)
+    {
+        var envelope = await _client.SendAsync<ApiEnvelope<MigrationProject>>(HttpMethod.Get, $"/v1/migrations/{Uri.EscapeDataString(id)}", null, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? throw new PostQException("API returned no migration project");
+    }
+
+    public async Task<MigrationProject> UpdateAsync(string id, MigrationUpdateInput input, CancellationToken ct = default)
+    {
+        var envelope = await _client.SendAsync<ApiEnvelope<MigrationProject>>(HttpMethod.Patch, $"/v1/migrations/{Uri.EscapeDataString(id)}", input, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? throw new PostQException("API returned no migration project");
+    }
+
+    public async Task<MigrationAction> UpdateActionAsync(string projectId, string actionId, object update, CancellationToken ct = default)
+    {
+        var path = $"/v1/migrations/{Uri.EscapeDataString(projectId)}/actions/{Uri.EscapeDataString(actionId)}";
+        var envelope = await _client.SendAsync<ApiEnvelope<MigrationAction>>(HttpMethod.Patch, path, update, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? throw new PostQException("API returned no migration action");
+    }
+
+    public async Task<MigrationEvidenceBundle> FinalizeEvidenceAsync(string projectId, string actionId, CancellationToken ct = default)
+    {
+        var path = $"/v1/migrations/{Uri.EscapeDataString(projectId)}/actions/{Uri.EscapeDataString(actionId)}/evidence";
+        var envelope = await _client.SendAsync<ApiEnvelope<MigrationEvidenceBundle>>(HttpMethod.Post, path, new { }, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? throw new PostQException("API returned no evidence bundle");
+    }
+
+    public async Task<JsonElement> Eo14412Async(CancellationToken ct = default)
+    {
+        var envelope = await _client.SendAsync<ApiEnvelope<JsonElement>>(HttpMethod.Get, "/v1/migrations/compliance/eo-14412", null, null, ct).ConfigureAwait(false);
+        return envelope?.Data ?? default;
     }
 }
 

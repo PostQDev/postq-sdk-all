@@ -369,3 +369,20 @@ def test_vault_uses_default_provider_and_save_envelope() -> None:
     assert result.saved_at == "2026-07-16T00:00:00Z"
     body = responses.calls[0].request.body
     assert b'"defaultKekProvider": "gcp-kms"' in body
+
+
+@responses.activate
+def test_migrations_create_and_update_contract() -> None:
+    project = {
+        "id": "project-1", "name": "2030 migration", "description": "",
+        "framework": "eo-14412", "track": "both", "status": "planned",
+        "targetDate": "2030-12-31", "sourceScanId": None, "metadata": {},
+        "createdAt": "2026-07-23T00:00:00Z", "updatedAt": "2026-07-23T00:00:00Z",
+    }
+    responses.add(responses.POST, "https://api.postq.dev/v1/migrations", json={"success": True, "data": project}, status=201)
+    responses.add(responses.PATCH, "https://api.postq.dev/v1/migrations/project-1", json={"success": True, "data": {**project, "status": "active"}})
+    pq = PostQ(api_key="pq_live_test")
+    created = pq.migrations.create(name="2030 migration", include_risk=["CRITICAL", "HIGH"])
+    assert created.id == "project-1"
+    assert b'"includeRisk": ["CRITICAL", "HIGH"]' in responses.calls[0].request.body
+    assert pq.migrations.update("project-1", status="active").status == "active"

@@ -48,6 +48,24 @@ aws = pq.scans.run_cloud(
     target="123456789012",
     aws={"regions": ["us-east-1"]},
 )
+gcp = pq.scans.run_cloud(
+    provider="gcp",
+    target="projects/acme/locations/us-east1/keyRings/production",
+    gcp={"keyRingName": "projects/acme/locations/us-east1/keyRings/production"},
+)
+```
+
+## Migration control plane (0.7.0+)
+
+```python
+project = pq.migrations.create(
+    name="EO 14412 migration",
+    track="both",
+    target_date="2030-12-31",
+    include_risk=["CRITICAL", "HIGH"],
+)
+pq.migrations.update(project.id, status="active")
+status = pq.migrations.eo_14412()
 ```
 
 ## Assets and keys (0.3.0+)

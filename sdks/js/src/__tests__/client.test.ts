@@ -180,6 +180,27 @@ describe("server-side scan execution", () => {
   });
 });
 
+describe("migration control plane", () => {
+  it("creates and updates provider-aware migration projects", async () => {
+    const project = {
+      id: "project-1", name: "2030 migration", description: "", framework: "eo-14412",
+      track: "both", status: "planned", targetDate: "2030-12-31", sourceScanId: null,
+      metadata: {}, createdAt: "2026-07-23T00:00:00Z", updatedAt: "2026-07-23T00:00:00Z",
+    };
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ ok: true, status: 201, text: () => Promise.resolve(JSON.stringify({ success: true, data: { ...project, actionCount: 4 } })) })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify({ success: true, data: { ...project, status: "active" } })) });
+    const pq = new PostQ({ apiKey: "pq_live_test", fetch: fetchMock as never });
+    const created = await pq.migrations.create({ name: project.name, includeRisk: ["CRITICAL", "HIGH"] });
+    expect(created.actionCount).toBe(4);
+    const [, createInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(createInit.body as string).includeRisk).toEqual(["CRITICAL", "HIGH"]);
+    const updated = await pq.migrations.update(project.id, { status: "active" });
+    expect(updated.status).toBe("active");
+    expect(fetchMock.mock.calls[1][0]).toBe(`https://api.postq.dev/v1/migrations/${project.id}`);
+  });
+});
+
 describe("hybrid payload encoding", () => {
   it("base64-encodes UTF-8 text without relying on a Node-only Buffer path", async () => {
     const fetchMock = mockFetch({

@@ -56,6 +56,13 @@ import {
   AttestationPolicyListOptions,
   AttestationPolicyListResult,
   AttestationPolicyUpdateInput,
+  MigrationProject,
+  MigrationUpdateInput,
+  MigrationCreateInput,
+  MigrationAction,
+  MigrationActionStatus,
+  MigrationEvidenceBundle,
+  Eo14412Status,
 } from "./types";
 
 const DEFAULT_BASE_URL = "https://api.postq.dev";
@@ -91,6 +98,7 @@ export class PostQ {
   readonly ledger: LedgerResource;
   readonly vault: VaultResource;
   readonly attestationPolicies: AttestationPoliciesResource;
+  readonly migrations: MigrationsResource;
 
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -128,6 +136,7 @@ export class PostQ {
     this.ledger = new LedgerResource(this);
     this.vault = new VaultResource(this);
     this.attestationPolicies = new AttestationPoliciesResource(this);
+    this.migrations = new MigrationsResource(this);
   }
 
   /** Hit `GET /health`. Throws if the API is down. */
@@ -467,6 +476,46 @@ export class AssetsResource {
       if (!page.pagination.nextCursor) return;
       cursor = page.pagination.nextCursor;
     }
+  }
+}
+
+/** Post-quantum migration projects, actions, compliance, and evidence. */
+export class MigrationsResource {
+  constructor(private readonly client: PostQ) {}
+
+  async list(): Promise<MigrationProject[]> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationProject[] }>("GET", "/v1/migrations");
+    return envelope.data;
+  }
+
+  async create(input: MigrationCreateInput): Promise<MigrationProject & { actionCount: number }> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationProject & { actionCount: number } }>("POST", "/v1/migrations", { body: input });
+    return envelope.data;
+  }
+
+  async get(id: string): Promise<MigrationProject> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationProject }>("GET", `/v1/migrations/${encodeURIComponent(id)}`);
+    return envelope.data;
+  }
+
+  async update(id: string, input: MigrationUpdateInput): Promise<MigrationProject> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationProject }>("PATCH", `/v1/migrations/${encodeURIComponent(id)}`, { body: input });
+    return envelope.data;
+  }
+
+  async updateAction(projectId: string, actionId: string, update: Partial<Pick<MigrationAction, "assignee" | "dueAt" | "afterScanId" | "downgradeProtected" | "dependentCredentialsRotated" | "validation" | "exception" | "externalIssueUrl">> & { status?: MigrationActionStatus }): Promise<MigrationAction> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationAction }>("PATCH", `/v1/migrations/${encodeURIComponent(projectId)}/actions/${encodeURIComponent(actionId)}`, { body: update });
+    return envelope.data;
+  }
+
+  async finalizeEvidence(projectId: string, actionId: string): Promise<MigrationEvidenceBundle> {
+    const envelope = await this.client.request<{ success: boolean; data: MigrationEvidenceBundle }>("POST", `/v1/migrations/${encodeURIComponent(projectId)}/actions/${encodeURIComponent(actionId)}/evidence`);
+    return envelope.data;
+  }
+
+  async eo14412(): Promise<Eo14412Status> {
+    const envelope = await this.client.request<{ success: boolean; data: Eo14412Status }>("GET", "/v1/migrations/compliance/eo-14412");
+    return envelope.data;
   }
 }
 

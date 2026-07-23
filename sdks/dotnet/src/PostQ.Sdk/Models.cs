@@ -98,6 +98,12 @@ public sealed class CloudScanAzureOptions
     public IReadOnlyList<string>? VaultNames { get; init; }
 }
 
+/// <summary>Options for a Google Cloud KMS/Cloud HSM inventory scan.</summary>
+public sealed class CloudScanGcpOptions
+{
+    public required string KeyRingName { get; init; }
+}
+
 /// <summary>Input for <see cref="ScansResource.RunCloudAsync"/>.</summary>
 public sealed class CloudScanInput
 {
@@ -105,6 +111,7 @@ public sealed class CloudScanInput
     public required string Target { get; init; }
     public CloudScanAwsOptions? Aws { get; init; }
     public CloudScanAzureOptions? Azure { get; init; }
+    public CloudScanGcpOptions? Gcp { get; init; }
 }
 
 /// <summary>Aggregate counts returned by a server-side cloud scan.</summary>
@@ -370,6 +377,86 @@ public sealed class Asset
     [JsonPropertyName("createdAt")] public required string CreatedAt { get; init; }
     /// <summary>ISO 8601 timestamp.</summary>
     [JsonPropertyName("updatedAt")] public required string UpdatedAt { get; init; }
+    [JsonPropertyName("workflowStatus")] public string? WorkflowStatus { get; init; }
+    [JsonPropertyName("ownerTeam")] public string? OwnerTeam { get; init; }
+    [JsonPropertyName("assignedTo")] public string? AssignedTo { get; init; }
+    [JsonPropertyName("criticality")] public string? Criticality { get; init; }
+    [JsonPropertyName("dataLifetimeYears")] public int? DataLifetimeYears { get; init; }
+    [JsonPropertyName("exposure")] public string? Exposure { get; init; }
+    [JsonPropertyName("migrationDueAt")] public string? MigrationDueAt { get; init; }
+    [JsonPropertyName("exception")] public JsonElement? Exception { get; init; }
+}
+
+public sealed class MigrationCreateInput
+{
+    public required string Name { get; init; }
+    public string Description { get; init; } = "";
+    public string Framework { get; init; } = "eo-14412";
+    public string Track { get; init; } = "both";
+    public string? TargetDate { get; init; }
+    public string? SourceScanId { get; init; }
+    public IReadOnlyList<string>? AssetIds { get; init; }
+    public IReadOnlyList<string>? IncludeRisk { get; init; }
+}
+
+public sealed class MigrationUpdateInput
+{
+    public string? Status { get; init; }
+    public string? TargetDate { get; init; }
+    public string? Description { get; init; }
+}
+
+public sealed class MigrationAction
+{
+    public required string Id { get; init; }
+    public required string ProjectId { get; init; }
+    public string? AssetId { get; init; }
+    public required string Title { get; init; }
+    public required string Provider { get; init; }
+    public string? SourceAlgorithm { get; init; }
+    public required string TargetAlgorithm { get; init; }
+    public required string ExecutionMode { get; init; }
+    public required string Status { get; init; }
+    public string? Assignee { get; init; }
+    public string? DueAt { get; init; }
+    public string? BeforeScanId { get; init; }
+    public string? AfterScanId { get; init; }
+    public bool? DowngradeProtected { get; init; }
+    public bool DependentCredentialsRotated { get; init; }
+    public JsonElement Validation { get; init; }
+    public JsonElement? Exception { get; init; }
+    public string? ExternalIssueUrl { get; init; }
+}
+
+public sealed class MigrationProject
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required string Description { get; init; }
+    public required string Framework { get; init; }
+    public required string Track { get; init; }
+    public required string Status { get; init; }
+    public string? TargetDate { get; init; }
+    public string? SourceScanId { get; init; }
+    public JsonElement Metadata { get; init; }
+    public string? CreatedAt { get; init; }
+    public string? UpdatedAt { get; init; }
+    public IReadOnlyList<MigrationAction> Actions { get; init; } = Array.Empty<MigrationAction>();
+    public IReadOnlyList<MigrationEvidenceBundle> Evidence { get; init; } = Array.Empty<MigrationEvidenceBundle>();
+    public int? ActionCount { get; init; }
+}
+
+public sealed class MigrationEvidenceBundle
+{
+    public required string Id { get; init; }
+    public required string ProjectId { get; init; }
+    public string? ActionId { get; init; }
+    public required string Format { get; init; }
+    public JsonElement Bundle { get; init; }
+    public required string BundleSha256 { get; init; }
+    public string? LedgerEntryId { get; init; }
+    public string? CheckpointId { get; init; }
+    public string? CreatedAt { get; init; }
 }
 
 /// <summary>Filters for <see cref="AssetsResource.ListAsync"/>.</summary>

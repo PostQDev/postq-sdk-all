@@ -23,6 +23,8 @@ All three expose the same surface, idiomatic to each language:
 - `pq.health()` → `GET /health`
 - hybrid key lifecycle, Policies, Ledger proofs/bundles, and Vault settings
 - multicloud Vault providers: AWS KMS, Azure Key Vault, and Google Cloud KMS
+- native AWS KMS and Google Cloud KMS / Cloud HSM ML-DSA providers
+- post-quantum migration projects, actions, EO 14412 status, and finalized evidence
 
 SDK-triggered cloud scans are useful for automation. For strict isolation,
 deploy the push-mode AWS/Azure scanners or Kubernetes Helm agent so customer

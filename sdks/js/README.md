@@ -51,6 +51,24 @@ const aws = await pq.scans.runCloud({
   target: "123456789012",
   aws: { regions: ["us-east-1", "us-west-2"], roleArn: "arn:aws:iam::…:role/PostQScanner" },
 });
+const gcp = await pq.scans.runCloud({
+  provider: "gcp",
+  target: "projects/acme/locations/us-east1/keyRings/production",
+  gcp: { keyRingName: "projects/acme/locations/us-east1/keyRings/production" },
+});
+```
+
+## Migration control plane (0.7.0+)
+
+```ts
+const project = await pq.migrations.create({
+  name: "EO 14412 migration",
+  track: "both",
+  targetDate: "2030-12-31",
+  includeRisk: ["CRITICAL", "HIGH"],
+});
+await pq.migrations.update(project.id, { status: "active" });
+const status = await pq.migrations.eo14412();
 ```
 
 ## Assets and keys (0.3.0+)

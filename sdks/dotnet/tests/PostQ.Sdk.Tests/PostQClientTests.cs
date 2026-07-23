@@ -175,6 +175,49 @@ public class PostQClientTests
     }
 
     [Fact]
+    public async Task RunCloud_Accepts_Google_Cloud_Kms()
+    {
+        var (client, mock) = Build();
+        mock.Expect(HttpMethod.Post, $"{Base}/v1/scans/cloud")
+            .WithPartialContent("\"provider\":\"gcp\"")
+            .Respond(HttpStatusCode.Created, "application/json",
+                """{"success":true,"data":{"id":"gcp-1","createdAt":"2026-07-23T00:00:00Z","provider":"gcp","target":"projects/acme/locations/global/keyRings/postq","mode":"live","riskScore":0,"riskLevel":"Safe","findingsCount":0,"resourcesCount":1,"summary":{"totalEndpoints":1,"quantumVulnerable":0,"hybridEnabled":0,"pqReady":1},"url":"https://app.postq.dev/scans/gcp-1"}}""");
+
+        var result = await client.Scans.RunCloudAsync(new CloudScanInput
+        {
+            Provider = "gcp",
+            Target = "projects/acme/locations/global/keyRings/postq",
+            Gcp = new CloudScanGcpOptions { KeyRingName = "projects/acme/locations/global/keyRings/postq" },
+        });
+
+        Assert.Equal("gcp", result.Provider);
+        mock.VerifyNoOutstandingExpectation();
+    }
+
+    [Fact]
+    public async Task Migrations_Create_And_Update_Project()
+    {
+        var (client, mock) = Build();
+        const string project = """{"id":"project-1","name":"2030 migration","description":"","framework":"eo-14412","track":"both","status":"planned","targetDate":"2030-12-31","sourceScanId":null,"metadata":{},"createdAt":"2026-07-23T00:00:00Z","updatedAt":"2026-07-23T00:00:00Z","actionCount":3}""";
+        mock.Expect(HttpMethod.Post, $"{Base}/v1/migrations")
+            .WithPartialContent("\"includeRisk\":[\"CRITICAL\",\"HIGH\"]")
+            .Respond(HttpStatusCode.Created, "application/json", $$"""{"success":true,"data":{{project}}}""");
+        mock.Expect(HttpMethod.Patch, $"{Base}/v1/migrations/project-1")
+            .WithPartialContent("\"status\":\"active\"")
+            .Respond("application/json", $$"""{"success":true,"data":{{project.Replace("\"planned\"", "\"active\"")}}}""");
+
+        var created = await client.Migrations.CreateAsync(new MigrationCreateInput
+        {
+            Name = "2030 migration",
+            IncludeRisk = new[] { "CRITICAL", "HIGH" },
+        });
+        Assert.Equal(3, created.ActionCount);
+        var updated = await client.Migrations.UpdateAsync("project-1", new MigrationUpdateInput { Status = "active" });
+        Assert.Equal("active", updated.Status);
+        mock.VerifyNoOutstandingExpectation();
+    }
+
+    [Fact]
     public async Task Policies_Parse_Enforcement_Model()
     {
         var (client, mock) = Build();
